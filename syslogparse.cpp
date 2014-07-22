@@ -46,7 +46,7 @@ using namespace std;
 #define MAX_CPU 32 //Can go higher or lower later as an argument
 
 //for testing
-void parse(const string str, vector<string> parsedvals, size_t chars );
+void parse(const string str, vector<string> parsedvals);
 
 
 /*
@@ -159,7 +159,7 @@ int main(int argc, char const *argv[])
 
 
 	for (vector<string>::iterator it = threadbuffs.begin() ; it != threadbuffs.end(); ++it)
-		threads.push_back(thread(parse, *it, parsedvals, buff.st_size));
+		threads.push_back(thread(parse, *it, parsedvals));
 
 
 	for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
@@ -170,22 +170,17 @@ int main(int argc, char const *argv[])
 }
 
 //parse is mostly just test code right now to verify a few things and benchmark
-void parse(const string str, vector<string> parsedvals, size_t chars ){
+void parse(const string str, vector<string> parsedvals){
 
-for (int i = 0; i < str.length(); ++i)
-{
-	cout << str[i];
-}
+// string com = str.substr(0, str.find("\n"));
+// cout << com << endl;
 
-
-//string com = str.substr(0, str.find("\n"));
-//cout << com;
 }
 
 
 vector<string> chunk(const char &buff, const uint8_t numCPU, const size_t length){
 
-	uint32_t i;
+	size_t i;
 	uint8_t j;
 	size_t lp = 0;
 	const string ch (&buff);
@@ -199,16 +194,19 @@ vector<string> chunk(const char &buff, const uint8_t numCPU, const size_t length
  		while(i < length && ch[i] != '\n') //check length before \n, save one operation.
  			i++;
 
- 		string rbuff = (char *) malloc((i - lp) + 1);	//create char array of appropriate size
-		rbuff.back() = '\0';							//Implement safe_malloc later
+ 		char * tmbuff = new char[(i - lp) + 1];	//create char array of appropriate size
+
+		string rbuff (tmbuff);
+		delete[] tmbuff;
+		rbuff.back() = '\0';
 
  		if(&rbuff == NULL)
  			err(1, "rbuff is null");
 
- 		rbuff = ch.substr(ch[lp], (i - lp));
+ 		rbuff = ch.substr(ch[lp], (i - lp)); //I am doing this wrong. Will deal with it later.
 		lp = i;
-		chunks.push_back(&rbuff[0]);	
- 	}
 
+		chunks.push_back(rbuff);	
+ 	}
 return chunks;
 }
