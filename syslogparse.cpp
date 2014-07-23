@@ -171,8 +171,6 @@ int main(int argc, char const *argv[])
 //parse is mostly just test code right now to verify a few things and benchmark
 void parse(const string str, vector<string> parsedvals){
 
- // string com = str.substr(0, str.find("\n"));
- // cout << com << endl;
 
 }
 
@@ -201,7 +199,9 @@ vector<string> chunk(const char &buff, const uint8_t numCPU, const size_t length
  		if(&rbuff == NULL)
  			err(1, "rbuff is null");
 
- 		rbuff = ch.substr(lp, (i - lp)); 	//I am doing this wrong. Will deal with it later.
+ 		rbuff = ch.substr(lp, (i - lp));
+		
+		cout << rbuff.substr(0, 30) << "\n\n";
 		lp = i;
 
 		chunks.push_back(rbuff);
