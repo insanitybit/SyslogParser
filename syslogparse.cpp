@@ -157,7 +157,6 @@ int main(int argc, char const *argv[])
 //	TODO
 //	void parse(&vector<char> thrbuffs, &vector<char> parsedvals);
 
-	cout << threadbuffs.size() << endl;
 	for (vector<string>::iterator it = threadbuffs.begin() ; it != threadbuffs.end(); ++it)
 		threads.push_back(thread(parse, *it, parsedvals));
 
@@ -206,7 +205,6 @@ vector<string> chunk(const char &buff, const uint8_t numCPU, const size_t length
 		lp = i;
 
 		chunks.push_back(rbuff);
-		cout << chunks.size() << endl;	
  	}
 return chunks;
 }
