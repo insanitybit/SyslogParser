@@ -1,7 +1,7 @@
 // Apparmor Rule Parser
 // Colin O'Brien - insanitybit
 // g++ ./syslogparse.cpp -O0 --std=c++0x -pthread -Wall
-// source available at: github.com/insanitybit
+// source available at: https://github.com/insanitybit/SyslogParser
 /*
 The goal of this program is to parse the system log for two things:
 1) Apparmor denials
@@ -152,15 +152,11 @@ int main(int argc, char const *argv[])
 	vector<string> parsedvals;
 	vector<std::thread> threads;
 
-	//create threads
-
-//	TODO
-//	void parse(&vector<char> thrbuffs, &vector<char> parsedvals);
-
+	//create threads. Pass thread *it, the string from that iterative position.
 	for (vector<string>::iterator it = threadbuffs.begin() ; it != threadbuffs.end(); ++it)
-		threads.push_back(thread(parse, *it, parsedvals));
+		threads.push_back(thread(parse, *it, parsedvals));	
 
-
+	//join threads.
 	for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
 
 	tm.stop();
@@ -171,7 +167,7 @@ int main(int argc, char const *argv[])
 //parse is mostly just test code right now to verify a few things and benchmark
 void parse(const string str, vector<string> parsedvals){
 
-
+	cout << str.substr(0, 50) << endl;
 }
 
 
@@ -200,11 +196,9 @@ vector<string> chunk(const char &buff, const uint8_t numCPU, const size_t length
  			err(1, "rbuff is null");
 
  		rbuff = ch.substr(lp, (i - lp));
-		
-		cout << rbuff.substr(0, 30) << "\n\n";
 		lp = i;
-
 		chunks.push_back(rbuff);
  	}
+
 return chunks;
 }
