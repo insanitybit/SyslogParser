@@ -1,6 +1,6 @@
 // Apparmor Rule Parser
 // Colin O'Brien - insanitybit
-// g++ ./syslogparse.cpp -O0 --std=c++0x -pthread
+// g++ ./syslogparse.cpp -O0 --std=c++0x -pthread -Wall
 // source available at: github.com/insanitybit
 /*
 The goal of this program is to parse the system log for two things:
@@ -109,7 +109,7 @@ int main(int argc, char const *argv[])
 	char * logbuff;
 	vector<string> threadbuffs;
 	uint8_t numCPU; //smallest data type available?
-	uint8_t i = 0;
+	//uint8_t i = 0;
 
 	//Check for root, we need it
 	if(getuid() != 0)
@@ -157,7 +157,7 @@ int main(int argc, char const *argv[])
 //	TODO
 //	void parse(&vector<char> thrbuffs, &vector<char> parsedvals);
 
-
+	cout << threadbuffs.size() << endl;
 	for (vector<string>::iterator it = threadbuffs.begin() ; it != threadbuffs.end(); ++it)
 		threads.push_back(thread(parse, *it, parsedvals));
 
@@ -172,8 +172,8 @@ int main(int argc, char const *argv[])
 //parse is mostly just test code right now to verify a few things and benchmark
 void parse(const string str, vector<string> parsedvals){
 
-// string com = str.substr(0, str.find("\n"));
-// cout << com << endl;
+ // string com = str.substr(0, str.find("\n"));
+ // cout << com << endl;
 
 }
 
@@ -184,29 +184,29 @@ vector<string> chunk(const char &buff, const uint8_t numCPU, const size_t length
 	uint8_t j;
 	size_t lp = 0;
 	const string ch (&buff);
-	vector<string> chunks (numCPU);
+	vector<string> chunks;
 	//cout << " length = " << length << endl;
 
  	for(j = 1; j <= numCPU; j++){
-
  		i = ((float)length * ((float)j / (float)numCPU));
 
- 		while(i < length && ch[i] != '\n') //check length before \n, save one operation.
+ 		while(i < length && ch[i] != '\n') 		//check length before \n, save one operation.
  			i++;
 
  		char * tmbuff = new char[(i - lp) + 1];	//create char array of appropriate size
 
 		string rbuff (tmbuff);
-		delete[] tmbuff;
+		delete[] tmbuff;						//release char array
 		rbuff.back() = '\0';
 
  		if(&rbuff == NULL)
  			err(1, "rbuff is null");
 
- 		rbuff = ch.substr(ch[lp], (i - lp)); //I am doing this wrong. Will deal with it later.
+ 		rbuff = ch.substr(lp, (i - lp)); 	//I am doing this wrong. Will deal with it later.
 		lp = i;
 
-		chunks.push_back(rbuff);	
+		chunks.push_back(rbuff);
+		cout << chunks.size() << endl;	
  	}
 return chunks;
 }
