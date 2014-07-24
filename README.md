@@ -22,6 +22,7 @@ Currently the code splits syslog into little bits and it can pass that to the 'p
 
 
 __Build Instructions__
+
 $ make
 
 run as root/sudo
