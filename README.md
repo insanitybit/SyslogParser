@@ -22,6 +22,6 @@ Currently the code splits syslog into little bits and it can pass that to the 'p
 
 
 __Build Instructions__
-g++ ./syslogparse.cpp --std=c++0x -pthread
+$ make
 
-For testing I pass in -O0 to get a worst-case look at performance. I also pass in -Wall. If you're testing you may want to do the same.
+run as root/sudo
