@@ -63,7 +63,7 @@ aaparse() takes in a string from the vector chunk returns. It parses this string
 its own vector of strings (TDB: vector of vector of strings? Probably).
 */
 
-void aaparse(const string str, vector<string>& parsedvals);
+void aaparse(const string str, vector<vector <string> >& parsedvals);
 
 
 
@@ -107,7 +107,7 @@ int main(){
 	// for benchmarking
 
 	Timer tm;
-	tm.start();
+	//tm.start();
 	
 	// real shit
 	int64_t fd = -1;
@@ -126,7 +126,7 @@ int main(){
 	if ((tmpCPU = sysconf( _SC_NPROCESSORS_ONLN )) < 1 || tmpCPU > 32)
 		tmpCPU = 2; // If we get some weird response, assume that the system is at least a dual core. It's 2014.
 
-	const uint8_t numCPU = tmpCPU; // if your CPU count changes partway through... bad
+	const uint8_t numCPU = 8;//tmpCPU; // if your CPU count changes partway through... bad
 
 	// Get a handle to the file, get its attributes, and then mmap it
 	if ((fd = open("/var/log/syslog", O_RDONLY, 0)) == -1)
@@ -152,14 +152,20 @@ int main(){
 
 	const_cast<const char *> (logbuff);	//I should do this better.
 	// split buffer
-	
+	tm.start();
+
 	const_cast<vector<string>& > (threadbuffs) = chunk(*logbuff, numCPU, buff.st_size);
 	munmap(logbuff, buff.st_size); 	// no more logbuff. We use threadbuffs now. :)
-	
+
+
+	tm.stop();
+	cout << "\ndchunk:: " << tm.duration() << endl;
+
+
 	vector<std::thread> threads;
-	vector<string> parsedvals;
+	vector<vector<string>> parsedvals;
 
-
+	tm.start();
 	// create threads. Pass thread *it, the string from that iterative position. cout << ' ' << *it;
 	for (vector<string>::iterator it = threadbuffs.begin() ; it != threadbuffs.end(); ++it)
 		threads.push_back(thread(aaparse, *it, std::ref(parsedvals)));	
@@ -168,20 +174,19 @@ int main(){
 	// join threads
 	for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
 
-	for (vector<string>::iterator its = parsedvals.begin() ; its != parsedvals.end(); ++its)
-	//	cout << *its << "\n\n";
-
-	assert(parsedvals.size() == numCPU);
 
 	tm.stop();
-	cout << "\nduration:: " << tm.duration() << endl;
+	cout << "\naaparse:: " << tm.duration() << endl;
+
+	cout << parsedvals.size() << endl; //how many rules we will be generating.
+
+	//tm.stop();
+	//cout << "\nduration:: " << tm.duration() << endl;
 	return 0;	
 }
 
-// parse is mostly just test code right now to verify a few things and benchmark
-void aaparse(const string str, vector<string>& parsedvals){
 
-//	size_t i = 0;
+void aaparse(const string str, vector<vector<string> >& parsedvals){
 
 // Parse out individual pieces of information that are relevant:
 //	operation - may not even be necessary?
@@ -192,24 +197,103 @@ void aaparse(const string str, vector<string>& parsedvals){
 
 // See issue #5 https://github.com/insanitybit/SyslogParser/issues/5
 
-const string profile 		= "profile=\"";		//the profile path for th eprogram
-const string denied_mask	= "denied_mask=\"";	//how the program tried ot access the file
-const string name 			= "name=\"";		//the file the program tried to access
+	const string apparmor 		= "apparmor=\"";
+	const string operation		= "operation=\"";
+	const string profile 		= "profile=\"";		// the profile path for th eprogram
+	const string denied_mask	= "denied_mask=\"";	// how the program tried ot access the file
+	const string name 			= "name=\"";		// the file the program tried to access	
+	const string capname		= "capname=\"";
 
-		size_t pos1 = str.find(profile);
-		pos1 += profile.length();
+	const string atts[3] 	= {profile, denied_mask, name};
+	const string catts[2]	= {profile, capname};
+	vector<string> attributes;
 
-		if(pos1 > str.length())
-			err(1, "aaparse overflow");
+	size_t track;
+	size_t i = 0;
+	size_t aapos;		// position of apparmor statement beginning
+	size_t laapos = 0;	// position of the previous apparmor statement beginning
+	size_t pos1;		// beginning of string we want to snip
+	size_t pos2;		// end of string we want to snip
+	string pstr;
+	//bool b = true;
 
-		size_t pos2 = str.find("\"", pos1);
-		pos2 = pos2 - pos1;
-		string pstr (str.substr(pos1, pos2));
+	aapos = str.find(apparmor, laapos);
 
+		if(aapos == string::npos)
+			return;
+
+
+	while(true){
+
+		//find apparmor violation
+		aapos = str.find(apparmor, laapos);
+
+		if(aapos == string::npos)
+			break;
+
+		aapos += apparmor.length() + 1;
+		laapos = aapos;
+
+		//is this a capability or not?
+
+		pos1 = str.find(operation, aapos);
+		pos1 += operation.length();
+		pos2 = str.find("\"", pos1);
+		pos2 -= pos1;
+		//pos2 += 9;
+		pstr = str.substr(pos1, pos2);
+
+		attributes.push_back(pstr);
+		//if it is a capability
+		if(pstr == "capable"){
+			for(i = 0; i < 2; i++){
+
+				pos1 = str.find(atts[i], aapos);
+
+				if(pos1 == string::npos)
+				break;
+
+				pos1 += atts[i].length();
+
+				pos2 = str.find("\"", pos1);
+				pos2 = pos2 - pos1;
+				pstr = str.substr(pos1, pos2);
+				// mtx.lock();
+				//cout << pstr << endl;
+				// mtx.unlock();
+				attributes.push_back(pstr);
+
+			}
+
+		}
+
+		//if it is not a capability
+		//extract the 3 attributes we want from it. profile, denied mask, name
+		else{
+			for(i = 0; i < 3; i++){
+
+				pos1 = str.find(atts[i], aapos);
+
+				if(pos1 == string::npos)
+				break;
+
+				pos1 += atts[i].length();
+
+				pos2 = str.find("\"", pos1);
+				pos2 = pos2 - pos1;
+				pstr = str.substr(pos1, pos2);
+				// mtx.lock();
+				//cout << pstr << endl;
+				// mtx.unlock();
+				attributes.push_back(pstr);
+
+			}
+		}
 		mtx.lock();
-		parsedvals.push_back(pstr);
-		cout << "\n\n"; // If you want to print out a string for debug, do here
+		parsedvals.push_back(attributes);
 		mtx.unlock();
+	}
+
 
 }
 
