@@ -190,19 +190,25 @@ void aaparse(const string str, vector<string>& parsedvals){
 // denied_mask="w"
 // Generate a rule:[permission] [path] [denied_mask] for [profile]
 
-//This part is clearly broken. It's either broken here or it's broken in chunk.
 // See issue #5 https://github.com/insanitybit/SyslogParser/issues/5
 
-		size_t pos1 = str.find("apparmor=\"");
+const string profile 		= "profile=\"";		//the profile path for th eprogram
+const string denied_mask	= "denied_mask=\"";	//how the program tried ot access the file
+const string name 			= "name=\"";		//the file the program tried to access
+
+		size_t pos1 = str.find(profile);
+		pos1 += profile.length();
+
 		if(pos1 > str.length())
 			err(1, "aaparse overflow");
 
-		size_t pos2 = str.find("\""); // test
-		string pstr (str.substr(pos1, 200));
+		size_t pos2 = str.find("\"", pos1);
+		pos2 = pos2 - pos1;
+		string pstr (str.substr(pos1, pos2));
 
 		mtx.lock();
 		parsedvals.push_back(pstr);
-		cout << pstr << "\n\n"; // If you want to print out a string for debug, do here
+		cout << "\n\n"; // If you want to print out a string for debug, do here
 		mtx.unlock();
 
 }
