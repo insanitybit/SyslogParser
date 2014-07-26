@@ -179,8 +179,20 @@ int main(){
 	for (vector<vector<string> >::iterator it = parsedvals.begin() ; it != parsedvals.end(); ++it);
 	//TBD
 
-
 	assert(parsedvals.size() > 0);
+
+	//shrink the vector by removing duplicates
+	tm.start();
+
+	vector<vector<string> >::iterator it;
+	it = unique (parsedvals.begin(), parsedvals.end()); 
+  	parsedvals.resize( std::distance(parsedvals.begin(),it) );
+
+  	tm.stop();
+  	cout << "shrink:: " << tm.duration() << "\n\n";
+
+
+  	
 	//tm.stop();
 	//cout << "\nduration:: " << tm.duration() << endl;
 	return 0;	
