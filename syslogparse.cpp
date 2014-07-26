@@ -118,7 +118,7 @@ int main(){
 	
 	size_t i = 0;
 
-	// Check for root, we need it
+	// Check for root, we need it -- or do we? Might be able to do this in another process.
 	// if(getuid() != 0)
 	// 	err(1, "getuid != 0");
 	
@@ -155,12 +155,11 @@ int main(){
 	tm.start();
 
 	const_cast<vector<string>& > (threadbuffs) = chunk(*logbuff, numCPU, buff.st_size);
-	munmap(logbuff, buff.st_size); 	// no more logbuff. We use threadbuffs now. :)
-
 
 	tm.stop();
 	cout << "\ndchunk:: " << tm.duration() << endl;
 
+	munmap(logbuff, buff.st_size); 	// no more logbuff. We use threadbuffs now. :)
 
 	vector<std::thread> threads;
 	vector<vector<string>> parsedvals;
@@ -170,16 +169,18 @@ int main(){
 	for (vector<string>::iterator it = threadbuffs.begin() ; it != threadbuffs.end(); ++it)
 		threads.push_back(thread(aaparse, *it, std::ref(parsedvals)));	
 	
-
 	// join threads
 	for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
-
 
 	tm.stop();
 	cout << "\naaparse:: " << tm.duration() << endl;
 
-	cout << parsedvals.size() << endl; //how many rules we will be generating.
 
+	for (vector<vector<string> >::iterator it = parsedvals.begin() ; it != parsedvals.end(); ++it);
+	//TBD
+
+
+	assert(parsedvals.size() > 0);
 	//tm.stop();
 	//cout << "\nduration:: " << tm.duration() << endl;
 	return 0;	
@@ -189,27 +190,22 @@ int main(){
 void aaparse(const string str, vector<vector<string> >& parsedvals){
 
 // Parse out individual pieces of information that are relevant:
-//	operation - may not even be necessary?
-//	profile
-//	name
-// denied_mask="w"
-// Generate a rule:[permission] [path] [denied_mask] for [profile]
-
-// See issue #5 https://github.com/insanitybit/SyslogParser/issues/5
+// Information A:[operation] [profile] [name] [denied_mask]
+// Information B:[operation] [profile] [capname]
 
 	const string apparmor 		= "apparmor=\"";
 	const string operation		= "operation=\"";
-	const string profile 		= "profile=\"";		// the profile path for th eprogram
+	const string profile 		= "profile=\"";		// the profile path for the program
 	const string denied_mask	= "denied_mask=\"";	// how the program tried ot access the file
 	const string name 			= "name=\"";		// the file the program tried to access	
 	const string capname		= "capname=\"";
 
-	const string atts[3] 	= {profile, denied_mask, name};
+	const string atts[3] 	= {profile, name, denied_mask};
 	const string catts[2]	= {profile, capname};
 	vector<string> attributes;
 
 	size_t track;
-	size_t i = 0;
+	size_t i;
 	size_t aapos;		// position of apparmor statement beginning
 	size_t laapos = 0;	// position of the previous apparmor statement beginning
 	size_t pos1;		// beginning of string we want to snip
@@ -227,9 +223,8 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 
 		//find apparmor violation
 		aapos = str.find(apparmor, laapos);
-
 		if(aapos == string::npos)
-			break;
+			return;
 
 		aapos += apparmor.length() + 1;
 		laapos = aapos;
@@ -248,12 +243,12 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 		if(pstr == "capable"){
 			for(i = 0; i < 2; i++){
 
-				pos1 = str.find(atts[i], aapos);
+				pos1 = str.find(catts[i], aapos);
 
 				if(pos1 == string::npos)
 				break;
 
-				pos1 += atts[i].length();
+				pos1 += catts[i].length();
 
 				pos2 = str.find("\"", pos1);
 				pos2 = pos2 - pos1;
@@ -288,10 +283,14 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 				attributes.push_back(pstr);
 
 			}
-		}
 		mtx.lock();
+		//cout << "attsize  " << attributes.size() << endl;
 		parsedvals.push_back(attributes);
+		attributes.clear();
+		//cout << "parsize  " << parsedvals.size() << endl;
 		mtx.unlock();
+		}
+
 	}
 
 
