@@ -21,11 +21,12 @@ identify critical performance issues.
 */
 
 
-//testlibs
+// testlibs
 #include <sys/time.h>
 
-//necessary
-#include <string.h>
+// necessary
+#include <string>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -40,13 +41,13 @@ identify critical performance issues.
 #include <thread>
 #include <algorithm>
 #include <streambuf>
+#include <functional>
+#include <mutex>
+#include <assert.h>
 
 using namespace std;
 
-#define MAX_CPU 32 //Can go higher or lower later as an argument
-
-//for testing
-void parse(const string str, vector<string> parsedvals);
+#define MAX_CPU 32 // Can go higher or lower later as an argument
 
 
 /*
@@ -56,10 +57,14 @@ and returns a vector 'chunks'.
 
 vector <string> chunk(const char &buff, const uint8_t numCPU, const size_t length);
 
+
 /*
-Parse is a threaded function. It will take in a chunk, parse it, and fill a buffer with the generated data.
+aaparse() takes in a string from the vector chunk returns. It parses this string and returns
+its own vector of strings (TDB: vector of vector of strings? Probably).
 */
-//void parse(&vector<char> threadbuffs, &vector<char> parsedvals); 
+
+void aaparse(const string str, vector<string>& parsedvals);
+
 
 
 class Timer
@@ -96,30 +101,34 @@ class Timer
 };
 
 
-int main(int argc, char const *argv[])
-{
-	//for benchmarking
+mutex mtx;
+
+int main(){
+	// for benchmarking
 
 	Timer tm;
 	tm.start();
 	
-	//real shit
-	int fd = -1;
+	// real shit
+	int64_t fd = -1;
 	struct stat buff;
 	char * logbuff;
 	vector<string> threadbuffs;
-	uint8_t numCPU; //smallest data type available?
-	//uint8_t i = 0;
-
-	//Check for root, we need it
-	if(getuid() != 0)
-		err(1, "getuid != 0");
+	uint8_t tmpCPU;
 	
-	//Check for CPU core count
-	if ((numCPU = sysconf( _SC_NPROCESSORS_ONLN )) < 1 || numCPU > 32)
-		numCPU = 2; //If we get some weird response, assume that the system is at least a dual core. It's 2014.
+	size_t i = 0;
 
-	//Get a handle to the file, get its attributes, and then mmap it
+	// Check for root, we need it
+	// if(getuid() != 0)
+	// 	err(1, "getuid != 0");
+	
+	// Check for CPU core count
+	if ((tmpCPU = sysconf( _SC_NPROCESSORS_ONLN )) < 1 || tmpCPU > 32)
+		tmpCPU = 2; // If we get some weird response, assume that the system is at least a dual core. It's 2014.
+
+	const uint8_t numCPU = tmpCPU; // if your CPU count changes partway through... bad
+
+	// Get a handle to the file, get its attributes, and then mmap it
 	if ((fd = open("/var/log/syslog", O_RDONLY, 0)) == -1)
 		err(1, "open on syslog failed :(");
 
@@ -127,47 +136,75 @@ int main(int argc, char const *argv[])
 		err(1, "fstat failed");
 
 	if(( logbuff = 
-		(char*)mmap(
-			NULL,				//OS chooses address
-			buff.st_size,		//Size of file
-			PROT_READ,			//Read only
-			MAP_PRIVATE,		//copy on write
+		static_cast<char*>(mmap(
+			NULL,				// OS chooses address
+			buff.st_size,		// Size of file
+			PROT_READ,			// Read only
+			MAP_PRIVATE,		// copy on write
 			fd,
 			0
-			)) == MAP_FAILED)
+			))
+		) == MAP_FAILED
+	)
 		err(1, "MAP_FAILED");
-				//and fill in a vector of parsed values	
-	close(fd); 	//we don't need the file descriptor anymore, use buffer from now on
+				// and fill in a vector of parsed values	
+	close(fd); 	// we don't need the file descriptor anymore, use buffer from now on
 
-
-	//split buffer
-
-	threadbuffs = chunk(*logbuff, numCPU, buff.st_size);
-	munmap(logbuff, buff.st_size); 	//no more logbuff. We use threadbuffs now. :)
+	const_cast<const char *> (logbuff);	//I should do this better.
+	// split buffer
 	
-	// for (vector<string>::iterator it = threadbuffs.begin() ; it != threadbuffs.end(); ++it)
- // 		std::cout << ' ' << *it;
- // 		std::cout << '\n';
-
-	vector<string> parsedvals;
+	const_cast<vector<string>& > (threadbuffs) = chunk(*logbuff, numCPU, buff.st_size);
+	munmap(logbuff, buff.st_size); 	// no more logbuff. We use threadbuffs now. :)
+	
 	vector<std::thread> threads;
+	vector<string> parsedvals;
 
-	//create threads. Pass thread *it, the string from that iterative position.
+
+	// create threads. Pass thread *it, the string from that iterative position. cout << ' ' << *it;
 	for (vector<string>::iterator it = threadbuffs.begin() ; it != threadbuffs.end(); ++it)
-		threads.push_back(thread(parse, *it, parsedvals));	
+		threads.push_back(thread(aaparse, *it, std::ref(parsedvals)));	
+	
 
-	//join threads.
+	// join threads
 	for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
 
+	for (vector<string>::iterator its = parsedvals.begin() ; its != parsedvals.end(); ++its)
+	//	cout << *its << "\n\n";
+
+	assert(parsedvals.size() == numCPU);
+
 	tm.stop();
-	cout << "duration:: " << tm.duration() << endl;
+	cout << "\nduration:: " << tm.duration() << endl;
 	return 0;	
 }
 
-//parse is mostly just test code right now to verify a few things and benchmark
-void parse(const string str, vector<string> parsedvals){
-	cout << "\n\n" << endl;
-	cout << str.substr(0, str.find('\n')) << endl << endl;
+// parse is mostly just test code right now to verify a few things and benchmark
+void aaparse(const string str, vector<string>& parsedvals){
+
+//	size_t i = 0;
+
+// Parse out individual pieces of information that are relevant:
+//	operation - may not even be necessary?
+//	profile
+//	name
+// denied_mask="w"
+// Generate a rule:[permission] [path] [denied_mask] for [profile]
+
+//This part is clearly broken. It's either broken here or it's broken in chunk.
+// See issue #5 https://github.com/insanitybit/SyslogParser/issues/5
+
+		size_t pos1 = str.find("apparmor=\"");
+		if(pos1 > str.length())
+			err(1, "aaparse overflow");
+
+		size_t pos2 = str.find("\""); // test
+		string pstr (str.substr(pos1, 200));
+
+		mtx.lock();
+		parsedvals.push_back(pstr);
+		cout << pstr << "\n\n"; // If you want to print out a string for debug, do here
+		mtx.unlock();
+
 }
 
 
@@ -175,28 +212,28 @@ vector<string> chunk(const char &buff, const uint8_t numCPU, const size_t length
 
 	size_t i;
 	uint8_t j;
-	size_t lp = 0;
+	size_t lp = 1;
 	const string ch (&buff);
 	vector<string> chunks;
-	//cout << " length = " << length << endl;
+	// cout << " length = " << length << endl;
 
- 	for(j = 1; j <= numCPU; j++){
- 		i = ((float)length * ((float)j / (float)numCPU));
+	for(j = 1; j <= numCPU; j++) {
+		i = (static_cast<float>(length) * (static_cast<float>(j) / static_cast<float>(numCPU)));
 
- 		while(i < length && ch[i] != '\n') 		//check length before \n, save one operation.
+		while(i < length && ch[i] != '\n') 	// check length before \n, save one operation.
  			i++;
 
- 		char * tmbuff = new char[(i - lp) + 1];	//create char array of appropriate size
+		const char * tmbuff = new char[(i - lp) + 1];	// create char array of appropriate size
 
-		string rbuff (tmbuff);
-		delete[] tmbuff;						//release char array
-		rbuff.back() = '\0';
+		string rbuff (tmbuff);				//I want to avoid this copy later. Seems dumb.
+		delete[] tmbuff;					// release char array
+		rbuff.back() = '\0';				// necessary?
 
- 		if(&rbuff == NULL)
- 			err(1, "rbuff is null");
+			if(&rbuff == NULL)
+				err(1, "rbuff is null");
 
- 		rbuff = ch.substr(lp, (i - lp));
-		lp = i + 1;
+		rbuff = ch.substr(lp, (i - lp));
+		lp = i + 1; // lp is equal to the character AFTER the new line
 		chunks.push_back(rbuff);
  	}
 
