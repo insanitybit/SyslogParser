@@ -15,14 +15,13 @@ If you notice any areas where code is ugly, inefficient, unsafe, etc. please fee
 This is *not* production quality. Don't try to build off of this for something else. I've barely worked on it yet and it could easily break things on your system.
 
 __TODO__
-Currently the code splits syslog into little bits and it can pass that to the 'parse' function. This is great and once a few bugs are worked out that's easily a solid start. What's left:
 
-1) Analyzing lines to determine if they are information we want to parse
-2) Actually go through the valid lines and generate information based on them.
-
+* Remove duplicate rules
+* Generate rules based on parsed Apparmor violations
+* Parse for iptables rules
 
 __Build Instructions__
 
+```
 $ make
-
-run as root/sudo
+```
