@@ -126,7 +126,7 @@ int main(){
 	if ((tmpCPU = sysconf( _SC_NPROCESSORS_ONLN )) < 1 || tmpCPU > 32)
 		tmpCPU = 2; // If we get some weird response, assume that the system is at least a dual core. It's 2014.
 
-	const uint8_t numCPU = 8;//tmpCPU; // if your CPU count changes partway through... bad
+	const uint8_t numCPU = tmpCPU; // if your CPU count changes partway through... bad
 
 	// Get a handle to the file, get its attributes, and then mmap it
 	if ((fd = open("/var/log/syslog", O_RDONLY, 0)) == -1)
@@ -192,7 +192,7 @@ int main(){
   	cout << "shrink:: " << tm.duration() << "\n\n";
 
 
-  	
+
 	//tm.stop();
 	//cout << "\nduration:: " << tm.duration() << endl;
 	return 0;	
@@ -211,6 +211,7 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 	const string denied_mask	= "denied_mask=\"";	// how the program tried ot access the file
 	const string name 			= "name=\"";		// the file the program tried to access	
 	const string capname		= "capname=\"";
+	const string status 		= "STATUS";
 
 	const string atts[3] 	= {profile, name, denied_mask};
 	const string catts[2]	= {profile, capname};
@@ -238,9 +239,19 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 		if(aapos == string::npos)
 			return;
 
-		aapos += apparmor.length() + 1;
+		aapos += apparmor.length();
 		laapos = aapos;
 
+		//handle apparmor="STATUS"
+		//if we end up needing "ALLOWED" or "DENIED" just do it here
+		pos1 = aapos;
+		pos2 = str.find("\"", pos1);
+		pos2 -= pos1;
+		pstr = str.substr(pos1, pos2);
+
+		if(pstr == "STATUS")
+			continue;
+		
 		//is this a capability or not?
 
 		pos1 = str.find(operation, aapos);
