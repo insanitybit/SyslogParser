@@ -180,38 +180,33 @@ int main(){
 
 	assert(parsedvals.size() > 0);
 
-	cout << parsedvals.size() << endl;
-	tm.start();
-
 	vector<vector<string> >::iterator it;
 	it = unique (parsedvals.begin(), parsedvals.end()); 
   	parsedvals.resize( std::distance(parsedvals.begin(),it) );
 
-  	tm.stop();
-  	cout << "shrink:: " << tm.duration() << "\n";
-  	cout << parsedvals.size() << endl;
+
   	// Begin rule generation
   	vector<string> rules;
 	i = 0;
 	threads.clear();
+
 	tm.start();
 	//this could be faster... urgh. Too many iterations. Ugly for loop. 
 	for (vector<vector<string> >::iterator it = parsedvals.begin() ; it != parsedvals.end(); ++it){
-
 		// create threads numCPU at a time
 		for(i = 0; i < numCPU; i++){
-		threads.push_back(thread(aagen, std::cref(*it), std::ref(rules)));
-		
-		if(it != parsedvals.end() - 1)
-			it++;
-
+			threads.push_back(thread(aagen, std::cref(*it), std::ref(rules)));
+			if(it != parsedvals.end() - 1)
+				it++;
+			else
+				break;
 		}
-
-		//std::advance(it, numCPU);
 		for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
-
 		threads.clear();
 	}
+		//If we break we have to clean up
+		for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
+		threads.clear();
 
 	tm.stop();
 	cout << "aagen:: " << tm.duration() << endl;
@@ -234,7 +229,7 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 //	cout << "in" << endl;
 
 	mtx.lock();
-
+	// << pvals[0] << "   " << pvals[1] << "   " << pvals[2] << "   " << pvals[3] << endl;
 	mtx.unlock();
 }
 
