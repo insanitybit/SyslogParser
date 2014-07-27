@@ -257,7 +257,7 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 
 
 	mtx.lock();
-	// << pvals[0] << "   " << pvals[1] << "   " << pvals[2] << "   " << pvals[3] << endl;
+	// cout << pvals[0] << "   " << pvals[1] << "   " << pvals[2] << "   " << pvals[3] << endl;
 	mtx.unlock();
 }
 
@@ -361,26 +361,25 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 vector<string> chunk(const char &buff, const uint8_t numCPU, const size_t length){
 
 	size_t i;
-	size_t j;
+	uint8_t j;
 	size_t lp = 1;
 	const string ch (&buff);
 	vector<string> chunks;
+	string rbuff;
 
 	for(j = 1; j <= numCPU; j++) {
 		i = (static_cast<float>(length) * (static_cast<float>(j) / static_cast<float>(numCPU)));
 
-		while(ch[i] != '\n')
- 			i++;
+ 		i = ch.find('\n', i);
 
- 		if(i >= length)
- 			break;
-
-		const char * tmbuff = new char[(i - lp) + 1];	// create char array of appropriate size
-
-		string rbuff (tmbuff);				// I want to avoid this copy later. Seems dumb.
-		delete[] tmbuff;					// release char array
-		rbuff.back() = '\0';				// necessary?	
-
+ 		if(i == string::npos){				//If we search for \n but don't find it
+ 			i = (length - 1);
+			rbuff.back() = '\0';				// necessary?
+			rbuff = ch.substr(lp, (i - lp));
+			chunks.push_back(rbuff);
+			return chunks;
+ 		}
+ 		rbuff.back() = '\0';				// necessary?
 		rbuff = ch.substr(lp, (i - lp));
 		lp = i + 1; // lp is equal to the character AFTER the new line
 		chunks.push_back(rbuff);
