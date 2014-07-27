@@ -176,7 +176,7 @@ int main(){
 	for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
 
 	tm.stop();
-	cout << "\naaparse:: " << tm.duration() << endl;
+	cout << "aaparse:: " << tm.duration() << endl;
 
 	assert(parsedvals.size() > 0);
 
@@ -186,18 +186,18 @@ int main(){
 
 
   	// Begin rule generation
+
+	tm.start();
   	vector<string> rules;
 	i = 0;
 	threads.clear();
 
-	tm.start();
-	//this could be faster... urgh. Too many iterations. Ugly for loop. 
 	for (vector<vector<string> >::iterator it = parsedvals.begin() ; it != parsedvals.end(); ++it){
 		// create threads numCPU at a time
 		for(i = 0; i < numCPU; i++){
 			threads.push_back(thread(aagen, std::cref(*it), std::ref(rules)));
-			if(it != parsedvals.end() - 1)
-				it++;
+			if(it != parsedvals.end() - 1)//Last one? Iterate, push, and break
+				++it;
 			else
 				break;
 		}
@@ -217,6 +217,8 @@ int main(){
 }
 
 void aagen(const vector<string>& pvals, vector<string>& rules){
+// Information Type A:[operation] [profile] [name] [denied_mask]
+// Information Type B:[operation] [profile] [capname]
 
 // Steps involved:
 // Take in vector of strings containing either Information Type A or B
@@ -227,6 +229,32 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 // Rate 'danger' of rule
 // Throw out rules
 //	cout << "in" << endl;
+
+	// if(!regex_match(pvals[1], regex for valid unix path )){
+	// 	exit();
+	// }
+
+	// if(pvals[0] != "capable"){ // just like aaparse there is going ot hav eto be
+								  // a fork based on this
+		//validate path via regex for pvals[2]
+	//	}
+
+	// reduce
+	// Is the last part of the path (p[2]) trailed by numbers?
+	// .so.1251.12 should just be .so.*
+	// Try to determine things like version numbers and glob them
+
+	// expand
+	// if you see read permission requested for a file ending in .so
+	// give it automatic map permission
+	// Maybe fstat the owner of the file is. If the process owns it, add owner?
+
+	// throw out rules
+	// certain rules may be too dangerous to allow? Nonsensical?
+
+	//concat the pvals into one rule string
+
+
 
 	mtx.lock();
 	// << pvals[0] << "   " << pvals[1] << "   " << pvals[2] << "   " << pvals[3] << endl;
@@ -333,7 +361,7 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 vector<string> chunk(const char &buff, const uint8_t numCPU, const size_t length){
 
 	size_t i;
-	uint8_t j;
+	size_t j;
 	size_t lp = 1;
 	const string ch (&buff);
 	vector<string> chunks;
@@ -341,22 +369,21 @@ vector<string> chunk(const char &buff, const uint8_t numCPU, const size_t length
 	for(j = 1; j <= numCPU; j++) {
 		i = (static_cast<float>(length) * (static_cast<float>(j) / static_cast<float>(numCPU)));
 
-		while(i < length && ch[i] != '\n')
+		while(ch[i] != '\n')
  			i++;
+
+ 		if(i >= length)
+ 			break;
 
 		const char * tmbuff = new char[(i - lp) + 1];	// create char array of appropriate size
 
 		string rbuff (tmbuff);				// I want to avoid this copy later. Seems dumb.
 		delete[] tmbuff;					// release char array
-		rbuff.back() = '\0';				// necessary?
-
-			if(&rbuff == NULL)
-				err(1, "rbuff is null");
+		rbuff.back() = '\0';				// necessary?	
 
 		rbuff = ch.substr(lp, (i - lp));
 		lp = i + 1; // lp is equal to the character AFTER the new line
 		chunks.push_back(rbuff);
  	}
-
 return chunks;
 }
