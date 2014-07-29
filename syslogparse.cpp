@@ -71,6 +71,11 @@ within a vector and generate the logical rule for that vector.
 void aagen(const vector<string>& pvals, vector<string>& rules);
 
 
+
+void ipparse(const string str, vector<vector<string> >& parsedvals);
+
+void ipgen(const vector<string>& pvals, vector<string>& rules);
+
 class Timer
 {
     timeval timer[2];
@@ -107,9 +112,8 @@ class Timer
 
 mutex mtx;
 
-int main(){
+int main(int argc, char *argv[]){ //arg[1] is whether it's apparmor or iptables
 	// for benchmarking
-
 	Timer tm;
 	//tm.start();
 	
@@ -160,17 +164,17 @@ int main(){
 	const_cast<vector<string>& > (threadbuffs) = chunk(*logbuff, numCPU, buff.st_size);
 
 	tm.stop();
-	cout << "\nchunk:: " << tm.duration() << endl;
+	cout << "\nchunk::   " << tm.duration() << endl;
 
 	munmap(logbuff, buff.st_size); 	// no more logbuff. We use threadbuffs now. :)
 
-	vector<std::thread> threads;
+	vector<std::thread> threads;	
 	vector<vector<string>> parsedvals;
 
 	tm.start();
 	// create threads. Pass thread *it, the string from that iterative position. cout << ' ' << *it;
 	for (vector<string>::iterator it = threadbuffs.begin() ; it != threadbuffs.end(); ++it)
-		threads.push_back(thread(aaparse, std::cref(*it), std::ref(parsedvals)));	
+		threads.push_back(thread(ipparse, std::cref(*it), std::ref(parsedvals)));	
 	
 	// join threads
 	for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
@@ -180,13 +184,20 @@ int main(){
 
 	assert(parsedvals.size() > 0);
 
+	// remove duplicates
+
+	tm.start();
+
+	sort(parsedvals.begin(), parsedvals.end());
+
 	vector<vector<string> >::iterator it;
 	it = unique (parsedvals.begin(), parsedvals.end()); 
-  	parsedvals.resize( std::distance(parsedvals.begin(),it) );
-
-
-  	// Begin rule generation
-
+  	parsedvals.resize( distance(parsedvals.begin(),it) );
+	
+	tm.stop();
+  	cout << "unique::  " << tm.duration() << endl;
+	cout << "size::    " << parsedvals.size() << endl;
+	// Begin rule generation
 	tm.start();
   	vector<string> rules;
 	i = 0;
@@ -195,7 +206,7 @@ int main(){
 	for (vector<vector<string> >::iterator it = parsedvals.begin() ; it != parsedvals.end(); ++it){
 		// create threads numCPU at a time
 		for(i = 0; i < numCPU; i++){
-			threads.push_back(thread(aagen, std::cref(*it), std::ref(rules)));
+			threads.push_back(thread(ipgen, std::cref(*it), std::ref(rules)));
 			if(it != parsedvals.end() - 1)//Last one? Iterate, push, and break
 				++it;
 			else
@@ -209,11 +220,23 @@ int main(){
 		threads.clear();
 
 	tm.stop();
-	cout << "aagen:: " << tm.duration() << endl;
+	cout << "aagen::   " << tm.duration() << endl;
 	cout << "\nDONE\n";
 	// tm.stop();
 	// cout << "\nduration:: " << tm.duration() << endl;
 	return 0;	
+}
+
+
+void ipgen(const vector<string>& pvals, vector<string>& rules){
+	// [direction][device][mac][srcip][dstip][protocol][srcport][destport]
+	int i = 0;
+	mtx.lock();
+	// for(i = 0; i < 7; i++)
+	// 	cout << pvals[i] << " \t";
+
+	// cout << endl;
+	mtx.unlock();
 }
 
 void aagen(const vector<string>& pvals, vector<string>& rules){
@@ -228,7 +251,10 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 // Validate rules REGEX
 // Rate 'danger' of rule
 // Throw out rules
-//	cout << "in" << endl;
+
+// example rules to generate: 
+// /opt/google/chrome/google-chrome r,
+// capability ipc_owner,
 
 	// if(!regex_match(pvals[1], regex for valid unix path )){
 	// 	exit();
@@ -252,14 +278,96 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 	// throw out rules
 	// certain rules may be too dangerous to allow? Nonsensical?
 
-	//concat the pvals into one rule string
+	// concat the pvals into one rule string
 
+	//string str = concat the variables
 
 
 	mtx.lock();
-	// cout << pvals[0] << "   " << pvals[1] << "   " << pvals[2] << "   " << pvals[3] << endl;
+
+	//cout << pvals[0] << "   " << pvals[1] << "   " << pvals[2] << "   " << pvals[3] << endl;
 	mtx.unlock();
 }
+
+void ipparse(const string str, vector<vector<string> >& parsedvals){
+
+/*
+IPTABLESINPUT: IN=lo OUT= MAC=00:**:** SRC=127.0.0.1 DST=127.0.0.1 
+LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=220 
+
+[direction][device][mac][srcip][dstip][protocol][srcport][destport]
+*/
+
+	const string iptables 			= "IPTABLES";
+	const string input 				= "INPUT:";
+	const string output				= "OUTPUT:";
+	const string in_device			= "IN=";
+	const string out_device			= "OUT=";
+	const string macaddr			= "MAC="; //this is a pain
+	const string source 			= "SRC=";
+	const string destination 		= "DST=";
+	const string protocol			= "PROTO=";
+	const string source_port		= "SPT=";
+	const string destination_port	= "DPT";
+
+	const string atts[8] 	= {	in_device,
+								out_device,
+								macaddr,
+								source,
+								destination,
+								protocol,
+								source_port,
+								destination_port
+								};
+	const uint8_t attsize = 8;
+	size_t i;
+	size_t aapos;		// position of apparmor statement beginning
+	size_t laapos = 0;	// position of the previous apparmor statement beginning
+	size_t pos1;		// beginning of string we want to snip
+	size_t pos2;		// end of string we want to snip
+	string pstr;
+
+	vector<string> attributes;
+
+	aapos = str.find(iptables, laapos);
+	if(aapos == string::npos)
+		return;
+
+	while(true){
+		// find apparmor violation
+		aapos = str.find(iptables, laapos);
+		if(aapos == string::npos)
+			return;
+
+		aapos += iptables.length();
+		laapos = aapos;
+		
+		// is this input or output
+		pos1 = str.find(iptables, aapos); 	//point to beginning of INPUT: or OUTPUT:
+		pos1 += iptables.length();			//point to end of IPTABLES
+		pos2 = str.find(":", pos1);			
+		pos2 -= pos1;
+		pstr = str.substr(pos1, pos2);
+		attributes.push_back(pstr);
+
+		for(i = 0; i < attsize; i++){
+			pos1 = str.find(atts[i], aapos);
+			if(pos1 == string::npos)
+				break;
+			
+			pos1 += atts[i].length();
+			pos2 = str.find(" ", pos1);
+			pos2 = pos2 - pos1;
+			pstr = str.substr(pos1, pos2);	
+			attributes.push_back(pstr);
+		}
+		mtx.lock();
+		parsedvals.push_back(attributes);
+		mtx.unlock();
+		attributes.clear();		
+	}
+}
+
 
 void aaparse(const string str, vector<vector<string> >& parsedvals){
 
@@ -291,8 +399,7 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 		return;
 
 	while(true){
-
-		//find apparmor violation
+		// find apparmor violation
 		aapos = str.find(apparmor, laapos);
 		if(aapos == string::npos)
 			return;
@@ -300,8 +407,8 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 		aapos += apparmor.length();
 		laapos = aapos;
 
-		//handle apparmor="STATUS"
-		//if we end up needing "ALLOWED" or "DENIED" just do it here
+		// handle apparmor="STATUS"
+		// if we end up needing "ALLOWED" or "DENIED" just do it here
 		pos1 = aapos;
 		pos2 = str.find("\"", pos1);
 		pos2 -= pos1;
@@ -310,8 +417,7 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 		if(pstr == status)
 			continue;
 		
-		//is this a capability or not?
-
+		// is this a capability or not?
 		pos1 = str.find(operation, aapos);
 		pos1 += operation.length();
 		pos2 = str.find("\"", pos1);
@@ -319,7 +425,7 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 		pstr = str.substr(pos1, pos2);
 		attributes.push_back(pstr);
 
-		//if it is a capability
+		// if it is a capability
 		if(pstr == "capable"){
 			for(i = 0; i < 2; i++){
 				pos1 = str.find(catts[i], aapos);
@@ -333,16 +439,13 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 				attributes.push_back(pstr);
 			}
 		}
-
-		//if it is not a capability
-		//extract the 3 attributes we want from it. profile, denied mask, name
+		// if it is not a capability
+		// extract the 3 attributes we want from it. profile, denied mask, name
 		else{
 			for(i = 0; i < 3; i++){
-
 				pos1 = str.find(atts[i], aapos);
-
 				if(pos1 == string::npos)
-				break;
+					break;
 
 				pos1 += atts[i].length();
 				pos2 = str.find("\"", pos1);
@@ -372,16 +475,14 @@ vector<string> chunk(const char &buff, const uint8_t numCPU, const size_t length
 
  		i = ch.find('\n', i);
 
- 		if(i == string::npos){				//If we search for \n but don't find it
+ 		if(i == string::npos){			// If we search for \n but don't find it
  			i = (length - 1);
-			rbuff.back() = '\0';				// necessary?
 			rbuff = ch.substr(lp, (i - lp));
 			chunks.push_back(rbuff);
 			return chunks;
  		}
- 		rbuff.back() = '\0';				// necessary?
 		rbuff = ch.substr(lp, (i - lp));
-		lp = i + 1; // lp is equal to the character AFTER the new line
+		lp = i + 1; 					// lp is equal to the character AFTER the new line
 		chunks.push_back(rbuff);
  	}
 return chunks;
