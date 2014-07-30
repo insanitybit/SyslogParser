@@ -116,6 +116,8 @@ int main(int argc, char *argv[]){ //arg[1] is whether it's apparmor or iptables
 	// for benchmarking
 	Timer tm;
 	//tm.start();
+	if(argc <= 1)
+		err(1, "Requires argument");
 	
 	// real shit
 	int64_t fd = -1;
@@ -157,7 +159,7 @@ int main(int argc, char *argv[]){ //arg[1] is whether it's apparmor or iptables
 
 	close(fd); 	// we don't need the file descriptor anymore, use buffer from now on
 
-	const_cast<const char *> (logbuff);	//I should do this better.
+	//const_cast<const char *> (logbuff);	//I should do this better.
 	// split buffer
 	tm.start();
 
@@ -170,19 +172,20 @@ int main(int argc, char *argv[]){ //arg[1] is whether it's apparmor or iptables
 
 	vector<std::thread> threads;	
 	vector<vector<string>> parsedvals;
-
 	tm.start();
+
 	// create threads. Pass thread *it, the string from that iterative position. cout << ' ' << *it;
 	for (vector<string>::iterator it = threadbuffs.begin() ; it != threadbuffs.end(); ++it)
-		threads.push_back(thread(ipparse, std::cref(*it), std::ref(parsedvals)));	
-	
+		threads.push_back(thread(aaparse, std::cref(*it), std::ref(parsedvals)));
 	// join threads
 	for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
 
-	tm.stop();
-	cout << "aaparse:: " << tm.duration() << endl;
-
 	assert(parsedvals.size() > 0);
+	
+	
+	tm.stop();
+	cout << "parse::   " << tm.duration() << endl;
+
 
 	// remove duplicates
 
@@ -206,7 +209,7 @@ int main(int argc, char *argv[]){ //arg[1] is whether it's apparmor or iptables
 	for (vector<vector<string> >::iterator it = parsedvals.begin() ; it != parsedvals.end(); ++it){
 		// create threads numCPU at a time
 		for(i = 0; i < numCPU; i++){
-			threads.push_back(thread(ipgen, std::cref(*it), std::ref(rules)));
+			threads.push_back(thread(aagen, std::cref(*it), std::ref(rules)));
 			if(it != parsedvals.end() - 1)//Last one? Iterate, push, and break
 				++it;
 			else
@@ -218,6 +221,7 @@ int main(int argc, char *argv[]){ //arg[1] is whether it's apparmor or iptables
 		//If we break we have to clean up
 		for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
 		threads.clear();
+	
 
 	tm.stop();
 	cout << "aagen::   " << tm.duration() << endl;
@@ -230,12 +234,13 @@ int main(int argc, char *argv[]){ //arg[1] is whether it's apparmor or iptables
 
 void ipgen(const vector<string>& pvals, vector<string>& rules){
 	// [direction][device][mac][srcip][dstip][protocol][srcport][destport]
-	int i = 0;
+int i = 0;
 	mtx.lock();
-	// for(i = 0; i < 7; i++)
-	// 	cout << pvals[i] << " \t";
+	for(i = 0; i < 9; i++)
+	  	cout << pvals[i] << "\t";
+	  // if(i)
 
-	// cout << endl;
+	  cout << endl;
 	mtx.unlock();
 }
 
@@ -308,7 +313,7 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 	const string destination 		= "DST=";
 	const string protocol			= "PROTO=";
 	const string source_port		= "SPT=";
-	const string destination_port	= "DPT";
+	const string destination_port	= "DPT=";
 
 	const string atts[8] 	= {	in_device,
 								out_device,
@@ -355,6 +360,20 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 			if(pos1 == string::npos)
 				break;
 			
+			if(attributes[0] == "INPUT" && i == 6){
+				attributes.push_back("SPT");
+				continue;
+			}
+			else if(attributes[0] == "OUTPUT" && i == 7){
+				attributes.push_back("DPT");
+				continue;
+			}
+
+			if(i == 2){
+				attributes.push_back("MAC");
+				continue;
+			}
+
 			pos1 += atts[i].length();
 			pos2 = str.find(" ", pos1);
 			pos2 = pos2 - pos1;
