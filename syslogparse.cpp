@@ -22,11 +22,10 @@ identify critical performance issues.
 
 
 // testlibs
-#include <sys/time.h>
+#include <chrono>
 
 // necessary
 #include <string>
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -76,48 +75,14 @@ void ipparse(const string str, vector<vector<string> >& parsedvals);
 
 void ipgen(const vector<string>& pvals, vector<string>& rules);
 
-class Timer
-{
-    timeval timer[2];
-
-  public:
-
-    timeval start()
-    {
-        gettimeofday(&this->timer[0], NULL);
-        return this->timer[0];
-    }
-
-    timeval stop()
-    {
-        gettimeofday(&this->timer[1], NULL);
-        return this->timer[1];
-    }
-
-    int duration() const
-    {
-        int secs(this->timer[1].tv_sec - this->timer[0].tv_sec);
-        int usecs(this->timer[1].tv_usec - this->timer[0].tv_usec);
-
-        if(usecs < 0)
-        {
-            --secs;
-            usecs += 1000000;
-        }
-
-        return static_cast<int>(secs * 1000 + usecs / 1000.0 + 0.5);
-    }
-};
-
-
 mutex mtx;
 
 int main(int argc, char *argv[]){ //arg[1] is whether it's apparmor or iptables
 	// for benchmarking
-	Timer tm;
-	//tm.start();
-	if(argc <= 1)
-		err(1, "Requires argument");
+    std::chrono::time_point<std::chrono::steady_clock> start, end;
+	std::chrono::duration<double> elapsed_seconds;
+	//if(argc <= 1)
+	//	err(1, "Requires argument");
 	
 	// real shit
 	int64_t fd = -1;
@@ -161,18 +126,19 @@ int main(int argc, char *argv[]){ //arg[1] is whether it's apparmor or iptables
 
 	//const_cast<const char *> (logbuff);	//I should do this better.
 	// split buffer
-	tm.start();
+
+    start = std::chrono::steady_clock::now();
 
 	const_cast<vector<string>& > (threadbuffs) = chunk(*logbuff, numCPU, buff.st_size);
 
-	tm.stop();
-	cout << "\nchunk::   " << tm.duration() << endl;
-
+    end = std::chrono::steady_clock::now();
+	elapsed_seconds = end-start;
+	cout << "chunk::  " << elapsed_seconds.count() * 1000 << " seconds" << endl;
 	munmap(logbuff, buff.st_size); 	// no more logbuff. We use threadbuffs now. :)
 
 	vector<std::thread> threads;	
 	vector<vector<string>> parsedvals;
-	tm.start();
+	start = std::chrono::steady_clock::now();
 
 	// create threads. Pass thread *it, the string from that iterative position. cout << ' ' << *it;
 	for (vector<string>::iterator it = threadbuffs.begin() ; it != threadbuffs.end(); ++it)
@@ -183,13 +149,13 @@ int main(int argc, char *argv[]){ //arg[1] is whether it's apparmor or iptables
 	assert(parsedvals.size() > 0);
 	
 	
-	tm.stop();
-	cout << "parse::   " << tm.duration() << endl;
-
+	end = std::chrono::steady_clock::now();
+	elapsed_seconds = end-start;
+	cout << "parse::  " << elapsed_seconds.count() * 1000 << " seconds" << endl;
 
 	// remove duplicates
 
-	tm.start();
+	start = std::chrono::steady_clock::now();
 
 	sort(parsedvals.begin(), parsedvals.end());
 
@@ -197,11 +163,13 @@ int main(int argc, char *argv[]){ //arg[1] is whether it's apparmor or iptables
 	it = unique (parsedvals.begin(), parsedvals.end()); 
   	parsedvals.resize( distance(parsedvals.begin(),it) );
 	
-	tm.stop();
-  	cout << "unique::  " << tm.duration() << endl;
+	end = std::chrono::steady_clock::now();
+  	elapsed_seconds = end-start;
+  	cout << "unique:: " << elapsed_seconds.count() * 1000 << " seconds" << endl;
 	cout << "size::    " << parsedvals.size() << endl;
+
 	// Begin rule generation
-	tm.start();
+	start = std::chrono::steady_clock::now();
   	vector<string> rules;
 	i = 0;
 	threads.clear();
@@ -222,9 +190,9 @@ int main(int argc, char *argv[]){ //arg[1] is whether it's apparmor or iptables
 		for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
 		threads.clear();
 	
-
-	tm.stop();
-	cout << "aagen::   " << tm.duration() << endl;
+	end = std::chrono::steady_clock::now();
+	elapsed_seconds = end-start;
+	cout << "gen::    " << elapsed_seconds.count() * 1000 << " seconds" << endl;
 	cout << "\nDONE\n";
 	// tm.stop();
 	// cout << "\nduration:: " << tm.duration() << endl;
