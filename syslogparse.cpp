@@ -37,6 +37,7 @@ identify critical performance issues.
 #include <sys/mman.h>
 #include <stack>
 #include <vector>
+#include <array>
 #include <thread>
 #include <algorithm>
 #include <streambuf>
@@ -286,16 +287,16 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 	const string source_port		= "SPT=";
 	const string destination_port	= "DPT=";
 
-	const string atts[8] 	= {	in_device,
-								out_device,
-								macaddr,
-								source,
-								destination,
-								protocol,
-								source_port,
-								destination_port
-								};
-	const uint8_t attsize = 8;
+	const array <string, 8> atts = {	
+									in_device,
+									out_device,
+									macaddr,
+									source,
+									destination,
+									protocol,
+									source_port,
+									destination_port
+									};
 	size_t i;
 	size_t aapos;		// position of apparmor statement beginning
 	size_t laapos = 0;	// position of the previous apparmor statement beginning
@@ -330,7 +331,7 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 		pstr = str.substr(pos1, pos2);
 		attributes.push_back(pstr);
 
-		for(i = 0; i < attsize; i++){
+		for(i = 0; i < atts.size(); i++){
 			pos1 = str.find(atts[i], aapos);
 			if(pos1 == string::npos)
 				break;
@@ -345,7 +346,7 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 			}
 
 			if(i == 2){
-				attributes.push_back("MAC");
+				attributes.push_back("MAC"); //Hopefully we can just ignore this. Parameter?
 				continue;
 			}
 
@@ -379,8 +380,8 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 	const string capname		= "capname=\"";
 	const string status 		= "STATUS";
 
-	const string atts[3] 	= {profile, name, denied_mask};
-	const string catts[2]	= {profile, capname};
+	const array<string, 3> atts 	= {profile, name, denied_mask};
+	const array<string, 2> catts 	= {profile, capname};
 	vector<string> attributes;
 
 	size_t i;
@@ -408,7 +409,7 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 		pos1 = aapos;
 		pos2 = str.find("\"", pos1);
 		if(pos2 == string::npos)
-			break;			
+			break; // I should maybe turn these into continues			
 		pos2 -= pos1;
 		pstr = str.substr(pos1, pos2);
 
@@ -429,7 +430,7 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 
 		// if it is a capability
 		if(pstr == "capable"){
-			for(i = 0; i < 2; i++){
+			for(i = 0; i < catts.size(); i++){
 				pos1 = str.find(catts[i], aapos);
 				if(pos1 == string::npos)
 				break;
@@ -446,7 +447,7 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 		// if it is not a capability
 		// extract the 3 attributes we want from it. profile, denied mask, name
 		else{
-			for(i = 0; i < 3; i++){
+			for(i = 0; i < atts.size(); i++){
 				pos1 = str.find(atts[i], aapos);
 				if(pos1 == string::npos)
 					break;
