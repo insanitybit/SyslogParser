@@ -25,7 +25,7 @@ identify critical performance issues.
 #include <chrono>
 
 // necessary
-#include <string>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -33,22 +33,19 @@ identify critical performance issues.
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <iostream>
-#include <err.h>
 #include <sys/mman.h>
+#include <string>
 #include <stack>
 #include <vector>
 #include <array>
 #include <thread>
-#include <algorithm>
-#include <streambuf>
-#include <functional>
 #include <mutex>
+#include <algorithm>
+#include <functional>
 #include <assert.h>
-#include <limits.h>
+#include <err.h>
 
 using namespace std;
-
-#define MAX_CPU 64 // PTHREAD_THREADS_MAX is always > 64
 
 /*
 chunk() takes in the mmap'd file buffer, CPU count, and size of the buffer. It splits it into 
@@ -74,26 +71,27 @@ void ipgen(const vector<string>& pvals, vector<string>& rules);
 
 mutex mtx;
 
-int main(int argc, char *argv[]){ //arg[1] is whether it's apparmor or iptables
+int main(int argc, char *argv[]){
 	// for benchmarking
     std::chrono::time_point<std::chrono::steady_clock> start, end;
 	std::chrono::duration<double> elapsed_seconds;
 
 	// real shit
 	int64_t fd = -1;
+	uint8_t tmpCPU;	
+	uint8_t MAX_CPU = 64; //POSIX guarantees minimum of 64 threads per process
+	size_t i;
 	struct stat buff;
 	char * logbuff;
 	vector<string> threadbuffs;
-	uint8_t tmpCPU;	
-	size_t i = 0;
+
 	void (*parse)(const string str, vector<vector<string> >& parsedvals);
 	void (*gen)(const vector<string>& pvals, vector<string>& rules);
 
 	if(argc <= 1)
 		err(1, "Requires argument");
 
-	string dec = argv[1];
-
+	const string dec = argv[1];
 
    	if(dec == "apparmor"){
    		parse = &aaparse;
@@ -164,12 +162,10 @@ int main(int argc, char *argv[]){ //arg[1] is whether it's apparmor or iptables
 	elapsed_seconds = end-start;
 	cout << "parse::  " << elapsed_seconds.count() * 1000 << " seconds" << endl;
 
-	// remove duplicates
-
 	start = std::chrono::steady_clock::now();
 
+	// remove duplicates
 	sort(parsedvals.begin(), parsedvals.end());
-
 	vector<vector<string> >::iterator it;
 	it = unique (parsedvals.begin(), parsedvals.end()); 
   	parsedvals.resize( distance(parsedvals.begin(),it) );
@@ -182,7 +178,6 @@ int main(int argc, char *argv[]){ //arg[1] is whether it's apparmor or iptables
 	// Begin rule generation
 	start = std::chrono::steady_clock::now();
   	vector<string> rules;
-	i = 0;
 	threads.clear();
 
 	for (vector<vector<string> >::iterator it = parsedvals.begin() ; it != parsedvals.end(); ++it){
@@ -260,10 +255,10 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 	//string str = concat the variables
 
 
-	mtx.lock();
+	//mtx.lock();
 
 	//cout << pvals[0] << "   " << pvals[1] << "   " << pvals[2] << "   " << pvals[3] << endl;
-	mtx.unlock();
+	//mtx.unlock();
 }
 
 void ipparse(const string str, vector<vector<string> >& parsedvals){
@@ -332,7 +327,7 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 		attributes.push_back(pstr);
 
 		for(i = 0; i < atts.size(); i++){
-			pos1 = str.find(atts[i], aapos);
+			pos1 = str.find(atts.at(i), aapos);
 			if(pos1 == string::npos)
 				break;
 			
@@ -350,7 +345,7 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 				continue;
 			}
 
-			pos1 += atts[i].length();
+			pos1 += atts.at(i).length();
 			pos2 = str.find(" ", pos1);
 			if(pos2 == string::npos)
 				break;			
@@ -431,11 +426,11 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 		// if it is a capability
 		if(pstr == "capable"){
 			for(i = 0; i < catts.size(); i++){
-				pos1 = str.find(catts[i], aapos);
+				pos1 = str.find(catts.at(i), aapos);
 				if(pos1 == string::npos)
 				break;
 
-				pos1 += catts[i].length();
+				pos1 += catts.at(i).length();
 				pos2 = str.find("\"", pos1);
 				if(pos2 == string::npos)
 					break;
@@ -448,11 +443,11 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 		// extract the 3 attributes we want from it. profile, denied mask, name
 		else{
 			for(i = 0; i < atts.size(); i++){
-				pos1 = str.find(atts[i], aapos);
+				pos1 = str.find(atts.at(i), aapos);
 				if(pos1 == string::npos)
 					break;
 
-				pos1 += atts[i].length();
+				pos1 += atts.at(i).length();
 				pos2 = str.find("\"", pos1);
 				if(pos2 == string::npos)
 					break;
