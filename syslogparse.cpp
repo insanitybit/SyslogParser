@@ -38,6 +38,7 @@ identify critical performance issues.
 #include <stack>
 #include <vector>
 #include <array>
+#include <map>
 #include <thread>
 #include <mutex>
 #include <algorithm>
@@ -155,8 +156,7 @@ int main(int argc, char *argv[]){
 	// join threads
 	for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
 
-	assert(parsedvals.size() > 0);
-	
+	assert(parsedvals.size() > 0);	
 	
 	end = std::chrono::steady_clock::now();
 	elapsed_seconds = end-start;
@@ -196,6 +196,7 @@ int main(int argc, char *argv[]){
 		for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
 		threads.clear();
 	
+
 	end = std::chrono::steady_clock::now();
 	elapsed_seconds = end-start;
 	cout << "gen::    " << elapsed_seconds.count() * 1000 << " seconds" << endl;
@@ -206,6 +207,31 @@ int main(int argc, char *argv[]){
 
 void ipgen(const vector<string>& pvals, vector<string>& rules){
 	// [direction][device][mac][srcip][dstip][protocol][srcport][destport]
+	// iptables -A OUTPUT -p tcp -m multiport --dports 80,8080,8000,443 -j ACCEPT
+
+	const string iptables 			= "iptables -A ";
+	const string input 				= "INPUT ";
+	const string output				= "OUTPUT ";
+	const string in_device			= " -i ";
+	const string out_device			= " -o ";
+	const string macaddr			= ""; // ignoring this
+	const string source 			= " -s ";
+	const string destination 		= " -d ";
+	const string protocol			= " -p ";
+	const string source_port		= " --sport ";
+	const string destination_port	= " --dport ";
+
+	const array <string, 8> atts = {	
+									in_device,
+									out_device,
+									macaddr,
+									source,
+									destination,
+									protocol,
+									source_port,
+									destination_port
+									};
+
 //int i = 0;
 	// mtx.lock();
 	// mtx.unlock();
@@ -224,41 +250,39 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 // Rate 'danger' of rule
 // Throw out rules
 
-// example rules to generate: 
-// /opt/google/chrome/google-chrome r,
-// capability ipc_owner,
+	string operation 	= pvals[0];
+	string profile		= pvals[1];
 
-	// if(!regex_match(pvals[1], regex for valid unix path )){
-	// 	exit();
-	// }
+	if(operation == "capable"){
+		string capname = pvals[2];
+		string rule = "profile:: " + pvals[0] + "rule:: capability " + capname + ",\n";
+		//validate capname first
+		mtx.lock();
+		rules.push_back(rule);
+		mtx.unlock();
+		return;
+	}
 
-	// if(pvals[0] != "capable"){ // just like aaparse there is going ot hav eto be
-								  // a fork based on this
-		//validate path via regex for pvals[2]
-	//	}
-
-	// reduce
-	// Is the last part of the path (p[2]) trailed by numbers?
-	// .so.1251.12 should just be .so.*
-	// Try to determine things like version numbers and glob them
-
-	// expand
-	// if you see read permission requested for a file ending in .so
-	// give it automatic map permission
-	// Maybe fstat the owner of the file is. If the process owns it, add owner?
-
-	// throw out rules
-	// certain rules may be too dangerous to allow? Nonsensical?
-
-	// concat the pvals into one rule string
-
-	//string str = concat the variables
-
-
-	//mtx.lock();
-
-	//cout << pvals[0] << "   " << pvals[1] << "   " << pvals[2] << "   " << pvals[3] << endl;
-	//mtx.unlock();
+	string name = pvals[2];
+	string denied_mask = pvals[3];
+	size_t cpos;
+	//check profile for child profile="/usr/bin/vlc///usr/bin/xdg-screensaver"
+	//turn it into profile="/usr/bin/vlc" child="/usr/bin/xdg-screensaver"
+	if((cpos = profile.find("///")) == string::npos){ //no child found
+		string rule = "profile:: " + profile + "child:: NULL rule:: " + name + " " + denied_mask + ",\n";
+		mtx.lock();
+		rules.push_back(rule);
+		mtx.unlock();
+		return;
+	}
+	//get the child path
+	string child = profile.substr((cpos + 2), profile.length());
+	profile = profile.substr(0, cpos);
+	mtx.lock();
+	string rule = "profile:: " + profile + " child:: " + child + " rule:: " + name + " " + denied_mask + ",\n";
+	rules.push_back(rule);
+	mtx.unlock();
+	return;
 }
 
 void ipparse(const string str, vector<vector<string> >& parsedvals){
@@ -339,7 +363,6 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 				attributes.push_back("DPT");
 				continue;
 			}
-
 			if(i == 2){
 				attributes.push_back("MAC"); //Hopefully we can just ignore this. Parameter?
 				continue;
@@ -404,13 +427,11 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 		pos1 = aapos;
 		pos2 = str.find("\"", pos1);
 		if(pos2 == string::npos)
-			break; // I should maybe turn these into continues			
+			continue; // I should maybe turn these into continues			
 		pos2 -= pos1;
-		pstr = str.substr(pos1, pos2);
-
+		pstr = str.substr(pos1, pos2);		
 		if(pstr == status)
-			continue;
-		
+			continue;		
 		// is this a capability or not?
 		pos1 = str.find(operation, aapos);
 		if(pos1 == string::npos)
@@ -418,7 +439,7 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 		pos1 += operation.length();
 		pos2 = str.find("\"", pos1);
 		if(pos2 == string::npos)
-			break;			
+			continue;			
 		pos2 -= pos1;
 		pstr = str.substr(pos1, pos2);
 		attributes.push_back(pstr);
@@ -474,9 +495,7 @@ vector<string> chunk(const char &buff, const uint8_t numCPU, const size_t length
 
 	for(j = 1; j <= numCPU; j++) {
 		i = (static_cast<float>(length) * (static_cast<float>(j) / static_cast<float>(numCPU)));
-
  		i = ch.find('\n', i);
-
  		if(i == string::npos){			// If we search for \n but don't find it
  			i = (length - 1);
 			rbuff = ch.substr(lp, (i - lp));
