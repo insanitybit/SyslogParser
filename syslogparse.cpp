@@ -80,7 +80,7 @@ int main(int argc, char *argv[]){
 	// real shit
 	int64_t fd = -1;
 	uint8_t tmpCPU;	
-	uint8_t MAX_CPU = 64; //POSIX guarantees minimum of 64 threads per process
+	uint8_t MAX_CPU = 256; //TODO: Find POSIX standard for this
 	size_t i;
 	struct stat buff;
 	char * logbuff;
@@ -89,8 +89,10 @@ int main(int argc, char *argv[]){
 	void (*parse)(const string str, vector<vector<string> >& parsedvals);
 	void (*gen)(const vector<string>& pvals, vector<string>& rules);
 
-	if(argc <= 1)
-		err(1, "Requires argument");
+	if(argc <= 1){
+		cout << "\nPass in either \"apparmor\" or \"iptables\" as a parameter. \n\n";
+		exit(1);
+	}
 
 	const string dec = argv[1];
 
@@ -107,6 +109,10 @@ int main(int argc, char *argv[]){
 	// Check for root, we need it -- or do we? Might be able to do this in another process.
 	// if(getuid() != 0)
 	// 	err(1, "getuid != 0");
+
+/*
+setcap-chroot, open file, drop to chroot, do work
+*/
 	
 	// Check for CPU core count
 	if ((tmpCPU = sysconf( _SC_NPROCESSORS_ONLN )) < 1 || tmpCPU > MAX_CPU)
@@ -192,18 +198,23 @@ int main(int argc, char *argv[]){
 		for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
 		threads.clear();
 	}
-		//If we break we have to clean up
+		// If we break we have to clean up
 		for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
 		threads.clear();
-	
 
 	end = std::chrono::steady_clock::now();
 	elapsed_seconds = end-start;
 	cout << "gen::    " << elapsed_seconds.count() * 1000 << " seconds" << endl;
+
+	// cout rules
+	for (vector<string>::iterator it = rules.begin() ; it != rules.end(); ++it)
+		cout << *it << endl;
+
+
+
 	cout << "\nDONE\n";
 	return 0;	
 }
-
 
 void ipgen(const vector<string>& pvals, vector<string>& rules){
 	// [direction][device][mac][srcip][dstip][protocol][srcport][destport]
@@ -212,29 +223,37 @@ void ipgen(const vector<string>& pvals, vector<string>& rules){
 	const string iptables 			= "iptables -A ";
 	const string input 				= "INPUT ";
 	const string output				= "OUTPUT ";
-	const string in_device			= " -i ";
-	const string out_device			= " -o ";
-	const string macaddr			= ""; // ignoring this
+	const string in_device			= "-i ";
+	const string out_device			= "-o ";
 	const string source 			= " -s ";
 	const string destination 		= " -d ";
 	const string protocol			= " -p ";
 	const string source_port		= " --sport ";
 	const string destination_port	= " --dport ";
 
-	const array <string, 8> atts = {	
-									in_device,
-									out_device,
-									macaddr,
-									source,
-									destination,
-									protocol,
-									source_port,
-									destination_port
-									};
-
-//int i = 0;
-	// mtx.lock();
-	// mtx.unlock();
+	string rule = "";
+	mtx.lock();
+	if(pvals[0] == "INPUT"){							
+				rule  = iptables + input +
+						in_device + pvals[1] +
+						source + pvals[4] +
+						destination + pvals[5] +
+						protocol + pvals[6] +
+						destination_port + pvals[7];
+	}else if(pvals[0] == "OUTPUT"){
+				rule  = iptables + output
+					+	out_device + pvals[1]
+					+	source + pvals[4]
+					+	destination + pvals[5]
+				 	+	protocol + pvals[6]
+				 	+	source_port + pvals[7];
+	}else{
+		err(1, "pvals[0] is not right.");
+	}
+	mtx.unlock();
+	mtx.lock();
+	rules.push_back(rule);
+	mtx.unlock();
 }
 
 void aagen(const vector<string>& pvals, vector<string>& rules){
@@ -250,12 +269,33 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 // Rate 'danger' of rule
 // Throw out rules
 
+//int8_t danger = -1;
+// make this thing a map
+// const array<int, 10> caps = 	{				//arbitrary right now for testing
+// 							dac_override 	= 5,
+// 							setgid 			= 5,
+// 							setuid			= 5,
+// 							sys_rawio		= 2,
+// 							ipc_owner		= 3,
+// 							chown			= 3,
+// 							fsetid			= 1,
+// 							sys_admin		= 10,
+// 							sys_chroot		= 1,
+// 							sys_ptrace		= 5,
+// 							};
+
 	string operation 	= pvals[0];
 	string profile		= pvals[1];
 
 	if(operation == "capable"){
+		// for (int i = 0; i < caps.size(); ++i)
+		// {
+		// 	if(caps[i] == pvals[2])
+		// 		danger += caps[i];
+		// }
+
 		string capname = pvals[2];
-		string rule = "profile:: " + pvals[0] + "rule:: capability " + capname + ",\n";
+		string rule = "profile:: " + profile + " rule:: capability " + capname + ",\n";
 		//validate capname first
 		mtx.lock();
 		rules.push_back(rule);
@@ -266,10 +306,8 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 	string name = pvals[2];
 	string denied_mask = pvals[3];
 	size_t cpos;
-	//check profile for child profile="/usr/bin/vlc///usr/bin/xdg-screensaver"
-	//turn it into profile="/usr/bin/vlc" child="/usr/bin/xdg-screensaver"
 	if((cpos = profile.find("///")) == string::npos){ //no child found
-		string rule = "profile:: " + profile + "child:: NULL rule:: " + name + " " + denied_mask + ",\n";
+		string rule = "profile:: " + profile + " child:: NULL rule:: " + name + " " + denied_mask + ",\n";
 		mtx.lock();
 		rules.push_back(rule);
 		mtx.unlock();
@@ -278,8 +316,8 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 	//get the child path
 	string child = profile.substr((cpos + 2), profile.length());
 	profile = profile.substr(0, cpos);
-	mtx.lock();
 	string rule = "profile:: " + profile + " child:: " + child + " rule:: " + name + " " + denied_mask + ",\n";
+	mtx.lock();
 	rules.push_back(rule);
 	mtx.unlock();
 	return;
@@ -299,14 +337,14 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 	const string output				= "OUTPUT:";
 	const string in_device			= "IN=";
 	const string out_device			= "OUT=";
-	const string macaddr			= "MAC="; //this is a pain
+	const string macaddr			= "MAC=";
 	const string source 			= "SRC=";
 	const string destination 		= "DST=";
 	const string protocol			= "PROTO=";
 	const string source_port		= "SPT=";
 	const string destination_port	= "DPT=";
 
-	const array <string, 8> atts = {	
+	const array <string, 8> atts = {
 									in_device,
 									out_device,
 									macaddr,
@@ -331,29 +369,33 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 
 	while(true){
 		// find apparmor violation
-		aapos = str.find(iptables, laapos);
+		aapos = str.find(iptables, laapos); //point to beginning of IPTABLES
 		if(aapos == string::npos)
 			return;
 
-		aapos += iptables.length();
+		aapos += iptables.length();			//point to end of IPTABLEs
 		laapos = aapos;
 		
 		// is this input or output
 		pos1 = str.find(iptables, aapos); 	//point to beginning of INPUT: or OUTPUT:
 		if(pos1 == string::npos)
-			break;			
-		pos1 += iptables.length();			//point to end of IPTABLES
+			break;
+		pos1 += iptables.length();			//point to end of INPUT or OUTPUT:
 		pos2 = str.find(":", pos1);
 		if(pos2 == string::npos)
-			break;			
+			break;
 		pos2 -= pos1;
 		pstr = str.substr(pos1, pos2);
 		attributes.push_back(pstr);
+		if(pstr != "INPUT" && pstr != "OUTPUT")
+			break;
+
+		//this is now a mess and should be two separate loops
 
 		for(i = 0; i < atts.size(); i++){
 			pos1 = str.find(atts.at(i), aapos);
 			if(pos1 == string::npos)
-				break;
+				return;
 			
 			if(attributes[0] == "INPUT" && i == 6){
 				attributes.push_back("SPT");
@@ -364,22 +406,22 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 				continue;
 			}
 			if(i == 2){
-				attributes.push_back("MAC"); //Hopefully we can just ignore this. Parameter?
-				continue;
+				attributes.push_back("MAC"); 	// MAC is annoying and unimportant for security.
+				continue;						// Plus, removing makes unique() far more effective
 			}
-
 			pos1 += atts.at(i).length();
 			pos2 = str.find(" ", pos1);
 			if(pos2 == string::npos)
-				break;			
+				break;
 			pos2 = pos2 - pos1;
-			pstr = str.substr(pos1, pos2);	
+			pstr = str.substr(pos1, pos2);
 			attributes.push_back(pstr);
+
 		}
 		mtx.lock();
 		parsedvals.push_back(attributes);
 		mtx.unlock();
-		attributes.clear();		
+		attributes.clear();
 	}
 }
 
@@ -427,19 +469,19 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 		pos1 = aapos;
 		pos2 = str.find("\"", pos1);
 		if(pos2 == string::npos)
-			continue; // I should maybe turn these into continues			
+			continue; // I should maybe turn these into continues
 		pos2 -= pos1;
-		pstr = str.substr(pos1, pos2);		
+		pstr = str.substr(pos1, pos2);
 		if(pstr == status)
-			continue;		
+			continue;
 		// is this a capability or not?
 		pos1 = str.find(operation, aapos);
 		if(pos1 == string::npos)
-			break;			
+			break;
 		pos1 += operation.length();
 		pos2 = str.find("\"", pos1);
 		if(pos2 == string::npos)
-			continue;			
+			continue;
 		pos2 -= pos1;
 		pstr = str.substr(pos1, pos2);
 		attributes.push_back(pstr);
@@ -483,6 +525,8 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 		}
 	}
 }
+
+
 
 vector<string> chunk(const char &buff, const uint8_t numCPU, const size_t length){
 

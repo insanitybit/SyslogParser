@@ -3,17 +3,28 @@
 CXXOBJECTS= %.o
 CXX= g++ 
 CXXSOURCES= syslogparse.cpp
-CXXFLAGS= -O0 --std=c++0x -Wextra -pedantic
-#I really have to figure out when to send in these flags
+CXXFLAGS= -g -O2 --std=c++0x -Wall -Wextra -pedantic -pthread -fPIC -fPIE -fstack-protector-all -FORTIFY_SOURCE
 
 syslogparse : syslogparse.o
-	g++ syslogparse.o -O0 --std=c++0x -Wextra -pedantic -pthread -o syslogparse
+	g++ syslogparse.o -g -O2 --std=c++0x -Wall -Wextra -pedantic -pthread -fPIC -fPIE -fstack-protector-all -FORTIFY_SOURCE -o syslogparse
 
+
+## caller : caller.o
+##	g++ caller.o -O2 --std=c++0x -Wextra -pedantic -o caller
 
 syslogparse.o : syslogparse.cpp
- 
+##caller.o : caller.cpp 
+
+make all:
+
+	make syslogparse
+	rm *.o
+
+make install:
+	mv syslogparse /usr/bin/syslogparse
+
 clean:
 
-	rm *.o
+	rm *.o syslogparse
 
 ## eof Makefile
