@@ -8,16 +8,6 @@ The goal of this program is to parse the system log for two things:
 2) Iptables logs
 
 The current tools for both of these actions are lacking in terms of both performance and usability.
-
-By making use of native and threaded code I should be able to speed things up considerably.
-Ideally this should perform one round of tasks in less than 100ms. This is ambitious but realistic.
-*/
-/*
-Benchmarking code taken from:
-http://stackoverflow.com/questions/3797708/millisecond-accurate-benchmarking-in-c
-
-I'll be moving to a new method later but for now this gives me a good estimate and allows me to
-identify critical performance issues.
 */
 
 
@@ -80,7 +70,7 @@ int main(int argc, char *argv[]){
 	// real shit
 	int64_t fd = -1;
 	uint8_t tmpCPU;	
-	uint8_t MAX_CPU = 256; //TODO: Find POSIX standard for this
+	uint16_t MAX_CPU = 256; //TODO: Find POSIX standard for this
 	size_t i;
 	struct stat buff;
 	char * logbuff;
@@ -148,7 +138,7 @@ setcap-chroot, open file, drop to chroot, do work
 
     end = std::chrono::steady_clock::now();
 	elapsed_seconds = end-start;
-	cout << "chunk::  " << elapsed_seconds.count() * 1000 << " seconds" << endl;
+	cout << "chunk::  " << elapsed_seconds.count() * 1000 << "ms" << endl;
 	
 	munmap(logbuff, buff.st_size); 	// no more logbuff. We use threadbuffs now. :)
 
@@ -166,7 +156,7 @@ setcap-chroot, open file, drop to chroot, do work
 	
 	end = std::chrono::steady_clock::now();
 	elapsed_seconds = end-start;
-	cout << "parse::  " << elapsed_seconds.count() * 1000 << " seconds" << endl;
+	cout << "parse::  " << elapsed_seconds.count() * 1000 << "ms" << endl;
 
 	start = std::chrono::steady_clock::now();
 
@@ -178,8 +168,8 @@ setcap-chroot, open file, drop to chroot, do work
 	
 	end = std::chrono::steady_clock::now();
   	elapsed_seconds = end-start;
-  	cout << "unique:: " << elapsed_seconds.count() * 1000 << " seconds" << endl;
-	cout << "size::    " << parsedvals.size() << endl;
+  	cout << "unique:: " << elapsed_seconds.count() * 1000 << "ms" << endl;
+	cout << "size::   " << parsedvals.size() << endl;
 
 	// Begin rule generation
 	start = std::chrono::steady_clock::now();
@@ -204,7 +194,7 @@ setcap-chroot, open file, drop to chroot, do work
 
 	end = std::chrono::steady_clock::now();
 	elapsed_seconds = end-start;
-	cout << "gen::    " << elapsed_seconds.count() * 1000 << " seconds" << endl;
+	cout << "gen::    " << elapsed_seconds.count() * 1000 << "ms" << endl;
 
 	// cout rules
 	for (vector<string>::iterator it = rules.begin() ; it != rules.end(); ++it)
@@ -284,8 +274,15 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 // 							sys_ptrace		= 5,
 // 							};
 
+
 	string operation 	= pvals[0];
 	string profile		= pvals[1];
+
+	// for(int i = 0; i < pvals.size(); ++i){
+	// 	mtx.lock();
+	// 	cout << pvals[i] << endl;
+	// 	mtx.unlock();
+	// }
 
 	if(operation == "capable"){
 		// for (int i = 0; i < caps.size(); ++i)
@@ -293,7 +290,6 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 		// 	if(caps[i] == pvals[2])
 		// 		danger += caps[i];
 		// }
-
 		string capname = pvals[2];
 		string rule = "profile:: " + profile + " rule:: capability " + capname + ",\n";
 		//validate capname first
@@ -305,14 +301,17 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 
 	string name = pvals[2];
 	string denied_mask = pvals[3];
+
 	size_t cpos;
 	if((cpos = profile.find("///")) == string::npos){ //no child found
 		string rule = "profile:: " + profile + " child:: NULL rule:: " + name + " " + denied_mask + ",\n";
+		cout << rule << endl;
 		mtx.lock();
 		rules.push_back(rule);
 		mtx.unlock();
 		return;
 	}
+
 	//get the child path
 	string child = profile.substr((cpos + 2), profile.length());
 	profile = profile.substr(0, cpos);
@@ -390,8 +389,8 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 		if(pstr != "INPUT" && pstr != "OUTPUT")
 			break;
 
-		//this is now a mess and should be two separate loops
 
+		// This could be faster, can split into two loops instead
 		for(i = 0; i < atts.size(); i++){
 			pos1 = str.find(atts.at(i), aapos);
 			if(pos1 == string::npos)
@@ -412,7 +411,7 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 			pos1 += atts.at(i).length();
 			pos2 = str.find(" ", pos1);
 			if(pos2 == string::npos)
-				break;
+				return;
 			pos2 = pos2 - pos1;
 			pstr = str.substr(pos1, pos2);
 			attributes.push_back(pstr);
@@ -469,7 +468,7 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 		pos1 = aapos;
 		pos2 = str.find("\"", pos1);
 		if(pos2 == string::npos)
-			continue; // I should maybe turn these into continues
+			return; // I should maybe turn these into continues
 		pos2 -= pos1;
 		pstr = str.substr(pos1, pos2);
 		if(pstr == status)
@@ -477,11 +476,11 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 		// is this a capability or not?
 		pos1 = str.find(operation, aapos);
 		if(pos1 == string::npos)
-			break;
+			return;
 		pos1 += operation.length();
 		pos2 = str.find("\"", pos1);
 		if(pos2 == string::npos)
-			continue;
+			return;
 		pos2 -= pos1;
 		pstr = str.substr(pos1, pos2);
 		attributes.push_back(pstr);
@@ -491,12 +490,12 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 			for(i = 0; i < catts.size(); i++){
 				pos1 = str.find(catts.at(i), aapos);
 				if(pos1 == string::npos)
-				break;
+				return;
 
 				pos1 += catts.at(i).length();
 				pos2 = str.find("\"", pos1);
 				if(pos2 == string::npos)
-					break;
+					return;
 				pos2 = pos2 - pos1;
 				pstr = str.substr(pos1, pos2);
 				attributes.push_back(pstr);
@@ -508,12 +507,12 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 			for(i = 0; i < atts.size(); i++){
 				pos1 = str.find(atts.at(i), aapos);
 				if(pos1 == string::npos)
-					break;
+					return;
 
 				pos1 += atts.at(i).length();
 				pos2 = str.find("\"", pos1);
 				if(pos2 == string::npos)
-					break;
+					return;
 				pos2 = pos2 - pos1;
 				pstr = str.substr(pos1, pos2);				
 				attributes.push_back(pstr);
