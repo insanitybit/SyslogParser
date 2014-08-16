@@ -1,0 +1,22 @@
+# Last Modified: Wed Aug 13 18:57:15 2014
+#include <tunables/global>
+
+/usr/bin/syslogparse {
+
+  /usr/bin/syslogparse mr,
+  /var/log/syslog mr,
+
+  /etc/ld.so.cache mr,
+
+  /sys/devices/system/cpu/online r,
+
+  
+  /lib/@{multiarch}/libgcc_s.so* mr,
+  /lib/@{multiarch}/libc-*.so mr,
+  /lib/@{multiarch}/libm-*.so mr,
+  /lib/@{multiarch}/libpthread*.so mr,
+
+  /usr/lib/@{multiarch}/libseccomp.so* mr,
+  /usr/lib/@{multiarch}/libstdc*.so* mr,
+
+}

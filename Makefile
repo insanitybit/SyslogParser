@@ -22,7 +22,7 @@ make all:
 
 make install:
 	mv syslogparse /usr/bin/syslogparse
-
+	mv usr.bin.syslogparse /etc/apparmor.d/usr.bin.syslogparse
 make uninstall:
 	rm -f /usr/bin/syslogparse
 
