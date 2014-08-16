@@ -14,6 +14,10 @@ The current tools for both of these actions are lacking in terms of both perform
 // testlibs
 #include <chrono>
 
+// seccomp
+#include <sys/prctl.h>     /* prctl */
+#include <seccomp.h>   /* libseccomp */
+
 // necessary
 #include <limits.h>
 #include <stdio.h>
@@ -43,7 +47,7 @@ chunk() takes in the mmap'd file buffer, CPU count, and size of the buffer. It s
 CPUcount chunks and returns a vector 'chunks'.
 */
 
-vector <string> chunk(const char &buff, const uint8_t numCPU, const size_t length);
+vector <string> chunk(const char &buff, const uint32_t numCPU, const size_t length);
 
 /*
 Parser fn's will take in the vector from chunks. They parse this and pull out a vector
@@ -63,19 +67,80 @@ void ipgen(const vector<string>& pvals, vector<string>& rules);
 mutex mtx;
 
 int main(int argc, char *argv[]){
+
+	//Sandboxing
+
+	//ToDo: chroot here or have parent process do it, probably parent
+
+
+	// if(prctl(PR_SET_NO_NEW_PRIVS, 1) == -1)
+	//  	err(0, "PR_SET_NO_NEW_PRIVS failed");
+	// prctl(PR_SET_NO_NEW_PRIVS, 1); // currently fails, figure out why later
+
+	if(prctl(PR_SET_DUMPABLE, 0) == -1)
+		err(0, "PR_SET_DUMPABLE failed");
+
+	scmp_filter_ctx ctx;
+	ctx = seccomp_init(SCMP_ACT_KILL);
+
+	//rules
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(rt_sigreturn), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(exit), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(exit_group), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(tgkill), 0);
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(brk), 0);
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(read), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(write), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(fstat), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(open), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(close), 0);
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(mprotect), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(mmap), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(munmap), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(madvise), 0);
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(futex), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(access), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(execve), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(clone), 0);
+
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(getrlimit), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(rt_sigaction), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(rt_sigprocmask), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(set_robust_list), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(set_tid_address), 0);
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(prctl), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(arch_prctl), 0);
+
+	//for benchmarking
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(clock_gettime), 0);
+
+	if(ctx == NULL)
+	 	err(0, "ctx == NULL");
+
+	if(seccomp_load(ctx) != 0)			//activate filter
+		err(0, "seccomp_load failed"); 
+
+  	cout << "seccomp: enabled" << endl;
+
 	// for benchmarking
     std::chrono::time_point<std::chrono::steady_clock> start, end;
 	std::chrono::duration<double> elapsed_seconds;
 
 	// real shit
 	int64_t fd = -1;
-	uint8_t tmpCPU;	
-	uint16_t MAX_CPU = 256; //TODO: Find POSIX standard for this
+	uint32_t tmpCPU;	
+	uint32_t MAX_CPU = 7600; //TODO: /proc/sys/kernel/threads-max - currently a worst case
 	size_t i;
 	struct stat buff;
 	char * logbuff;
 	vector<string> threadbuffs;
-
+	
 	void (*parse)(const string str, vector<vector<string> >& parsedvals);
 	void (*gen)(const vector<string>& pvals, vector<string>& rules);
 
@@ -93,12 +158,12 @@ int main(int argc, char *argv[]){
 		parse = &ipparse;
 		gen = &ipgen;
 	}else{
-		err(1, "Invalid argument");
+		err(0, "Invalid argument");
 	}
 
-	// Check for root, we need it -- or do we? Might be able to do this in another process.
+	// Activate later when we start doing chroot sandboxing?
 	// if(getuid() != 0)
-	// 	err(1, "getuid != 0");
+	// 	err(0, "getuid != 0");
 
 /*
 setcap-chroot, open file, drop to chroot, do work
@@ -108,14 +173,14 @@ setcap-chroot, open file, drop to chroot, do work
 	if ((tmpCPU = sysconf( _SC_NPROCESSORS_ONLN )) < 1 || tmpCPU > MAX_CPU)
 		tmpCPU = 2; // If we get some weird response, assume that the system is at least a dual core. It's 2014.
 
-	const uint8_t numCPU = tmpCPU;
+	const uint32_t numCPU = 1; //tmpCPU;
 
 	// Get a handle to the file, get its attributes, and then mmap it
 	if ((fd = open("/var/log/syslog", O_RDONLY, 0)) == -1)
-		err(1, "open on syslog failed :(");
+		err(0, "open on syslog failed :(");
 
 	if(fstat(fd, &buff) == -1)
-		err(1, "fstat failed");
+		err(0, "fstat failed");
 
 	if(( logbuff = 
 		static_cast<char*>(mmap(
@@ -128,7 +193,7 @@ setcap-chroot, open file, drop to chroot, do work
 			))
 		) == MAP_FAILED
 	)
-		err(1, "MAP_FAILED");
+		err(0, "MAP_FAILED");
 
 	close(fd); 	// we don't need the file descriptor anymore, use buffer from now on
 
@@ -157,7 +222,7 @@ setcap-chroot, open file, drop to chroot, do work
 	end = std::chrono::steady_clock::now();
 	elapsed_seconds = end-start;
 	cout << "parse::  " << elapsed_seconds.count() * 1000 << "ms" << endl;
-
+	cout << "size::   " << parsedvals.size() << endl;
 	start = std::chrono::steady_clock::now();
 
 	// remove duplicates
@@ -196,11 +261,10 @@ setcap-chroot, open file, drop to chroot, do work
 	elapsed_seconds = end-start;
 	cout << "gen::    " << elapsed_seconds.count() * 1000 << "ms" << endl;
 
-	// cout rules
+//	cout rules
+
 	for (vector<string>::iterator it = rules.begin() ; it != rules.end(); ++it)
 		cout << *it << endl;
-
-
 
 	cout << "\nDONE\n";
 	return 0;	
@@ -238,7 +302,7 @@ void ipgen(const vector<string>& pvals, vector<string>& rules){
 				 	+	protocol + pvals[6]
 				 	+	source_port + pvals[7];
 	}else{
-		err(1, "pvals[0] is not right.");
+		err(0, "pvals[0] is not right.");
 	}
 	mtx.unlock();
 	mtx.lock();
@@ -305,7 +369,6 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 	size_t cpos;
 	if((cpos = profile.find("///")) == string::npos){ //no child found
 		string rule = "profile:: " + profile + " child:: NULL rule:: " + name + " " + denied_mask + ",\n";
-		cout << rule << endl;
 		mtx.lock();
 		rules.push_back(rule);
 		mtx.unlock();
@@ -525,9 +588,7 @@ void aaparse(const string str, vector<vector<string> >& parsedvals){
 	}
 }
 
-
-
-vector<string> chunk(const char &buff, const uint8_t numCPU, const size_t length){
+vector<string> chunk(const char &buff, const uint32_t numCPU, const size_t length){
 
 	size_t i;
 	uint8_t j;
