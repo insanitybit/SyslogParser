@@ -3,27 +3,30 @@ SyslogParser
 
 A system log parser designed to make use of system resources to be as fast as possible.
 
-In the current stage there's already a clear benefit to the threaded approach. 
+__Features__
 
+* Threaded where possible, performance increase is considerable with even a dual core CPU.
+* Generation of iptables and apparmor rules.
+* Makes use of sandboxing. Currently seccomp sandboxing, apparmor profile (apparmor currently not enforced).
 
 __Goals__
 
-The goal should be to leverage a systems resources in order to provide a fast way to parse through the system log. This is helpful for things like parsing apparmor denials, iptables violations, application crashes, violations, etc.
+The goal of this program is to sort through the system log, find iptables and apparmor violations, and generate usable rules based on them.
 
-If you notice any areas where code is ugly, inefficient, unsafe, etc. please feel free to let me know or submit a pull request with an explanation behind it.
+All of this is done within a threaded, sandboxed process. A parent process will display the information in a GUI.
 
-This is *not* production quality. Don't try to build off of this for something else. I've barely worked on it.
 
 __TODO__
 
-* Remove duplicate apparmor rules
-* Start looking for iptables users for output rules
+* Work on chroot sandbox. Most of this will likely happen through the parent process. Work in progress.
+* Build GUI to pipe in rules from child and allow the user to use the rules. Work in progress.
+* Validate rules on parent side - child is in apparmor profile, don't allow modification of that profile. Not started.
 
 __Build Instructions__
 
 ```
-$ make
-$ make install
+$ make all
+$ sudo make install
 
 run with syslogparse [parameter]
 ```
