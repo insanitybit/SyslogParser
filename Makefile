@@ -16,7 +16,7 @@ syslogparse.o : syslogparse.cpp
 ##caller.o : caller.cpp 
 
 make all:
-
+	cppcheck --enable=all syslogparse.cpp
 	make syslogparse
 	rm -f *.o
 
