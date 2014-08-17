@@ -7,7 +7,7 @@ __Features__
 
 * Threaded where possible, performance increase is considerable with even a dual core CPU.
 * Generation of iptables and apparmor rules.
-* Makes use of sandboxing. Currently seccomp sandboxing, apparmor profile (apparmor currently not enforced).
+* Makes use of sandboxing. Currently seccomp sandboxing and an apparmor profile.
 
 __Goals__
 
@@ -18,7 +18,7 @@ All of this is done within a threaded, sandboxed process. A parent process will 
 
 __TODO__
 
-* Work on chroot sandbox. Most of this will likely happen through the parent process. Work in progress.
+* Work on further sandboxing.
 * Build GUI to pipe in rules from child and allow the user to use the rules. Work in progress.
 * Validate rules on parent side - child is in apparmor profile, don't allow modification of that profile. Not started.
 

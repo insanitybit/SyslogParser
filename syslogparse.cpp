@@ -70,43 +70,38 @@ int main(int argc, char *argv[]){
 
 	//Sandboxing
 
-	//ToDo: chroot here or have parent process do it, probably parent
-
-
-	// if(prctl(PR_SET_NO_NEW_PRIVS, 1) == -1)
-	//  	err(0, "PR_SET_NO_NEW_PRIVS failed");
-	// prctl(PR_SET_NO_NEW_PRIVS, 1); // currently fails, figure out why later
+	if(prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == -1)
+	 	err(0, "PR_SET_NO_NEW_PRIVS failed");
 
 	if(prctl(PR_SET_DUMPABLE, 0) == -1)
 		err(0, "PR_SET_DUMPABLE failed");
 
+
 	scmp_filter_ctx ctx;
 	ctx = seccomp_init(SCMP_ACT_KILL);
 
-	//rules
+	// rules - TODO: Find rules where filtering parameters is viable
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(rt_sigreturn), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(exit), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(exit_group), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(tgkill), 0);
 
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(brk), 0);
-
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(access), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(read), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(write), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(fstat), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(open), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(close), 0);
 
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(brk), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(mprotect), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(mmap), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(munmap), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(madvise), 0);
 
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(futex), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(access), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(execve), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(clone), 0);
-
 
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(getrlimit), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(rt_sigaction), 0);
@@ -114,14 +109,11 @@ int main(int argc, char *argv[]){
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(set_robust_list), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(set_tid_address), 0);
 
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(prctl), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(arch_prctl), 0);
+	// seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(prctl), 0);
+	// seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(arch_prctl), 0);
 
 	//for benchmarking
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(clock_gettime), 0);
-
-	if(ctx == NULL)
-	 	err(0, "ctx == NULL");
 
 	if(seccomp_load(ctx) != 0)			//activate filter
 		err(0, "seccomp_load failed"); 
@@ -160,14 +152,6 @@ int main(int argc, char *argv[]){
 	}else{
 		err(0, "Invalid argument");
 	}
-
-	// Activate later when we start doing chroot sandboxing?
-	// if(getuid() != 0)
-	// 	err(0, "getuid != 0");
-
-/*
-setcap-chroot, open file, drop to chroot, do work
-*/
 	
 	// Check for CPU core count
 	if ((tmpCPU = sysconf( _SC_NPROCESSORS_ONLN )) < 1 || tmpCPU > MAX_CPU)
@@ -263,8 +247,8 @@ setcap-chroot, open file, drop to chroot, do work
 
 //	cout rules
 
-	for (vector<string>::iterator it = rules.begin() ; it != rules.end(); ++it)
-		cout << *it << endl;
+	// for (vector<string>::iterator it = rules.begin() ; it != rules.end(); ++it)
+	// 	cout << *it << endl;
 
 	cout << "\nDONE\n";
 	return 0;	
@@ -323,21 +307,45 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 // Rate 'danger' of rule
 // Throw out rules
 
-//int8_t danger = -1;
-// make this thing a map
-// const array<int, 10> caps = 	{				//arbitrary right now for testing
-// 							dac_override 	= 5,
-// 							setgid 			= 5,
-// 							setuid			= 5,
-// 							sys_rawio		= 2,
-// 							ipc_owner		= 3,
-// 							chown			= 3,
-// 							fsetid			= 1,
-// 							sys_admin		= 10,
-// 							sys_chroot		= 1,
-// 							sys_ptrace		= 5,
-// 							};
+//0 - 10, 10 being greatest. -1 is unknown danger.
 
+// int8_t danger = -1;
+
+// map<string,int8_t> caps; //arbitrary right now for testing
+// 						caps["chown"] = 5;
+// 						caps["dac_override"] = 10;
+// 						caps["dac_read_search"] = 7;
+// 						caps["fowner"] = 5;
+// 						caps["fsetid"] = 10;
+// 						caps["kill"] = 3;
+// 						caps["setgid"] = 10;
+// 						caps["setuid"] = 10;
+// 						caps["setpcap"] = 5;
+// 						caps["linux_immutable"] = 1;
+// 						caps["net_bind_service"] = 2;
+// 						caps["net_broadcast"] = 2;
+// 						caps["net_admin"] = 2;
+// 						caps["net_raw"] = 2;
+// 						caps["ipc_lock"] = 0;
+// 						caps["ipc_owner"] = 5;
+// 						caps["sys_module"] = 1;
+// 						caps["sys_rawio"] = 1;
+// 						caps["sys_chroot"] = 1;
+// 						caps["sys_ptrace"] = 7;
+// 						caps["sys_pacct"] = -1;
+// 						caps["sys_admin"] = 10;
+// 						caps["sys_boot"] = -1;
+// 						caps["sys_nice"] = 0;
+// 						caps["sys_resource"] = 0;
+// 						caps["sys_time"] = 7;
+// 						caps["sys_tty_config"] = -1;
+// 						caps["mknod"] = -1;
+// 						caps["lease"] = -1;
+// 						caps["audit_write"] = 5;
+// 						caps["audit_control"] = 5;
+// 						caps["setfcap"] = 5;
+// 						caps["mac_override"] = 10; 	// never allow
+// 						caps["mac_admin"] = 10;		// never allow
 
 	string operation 	= pvals[0];
 	string profile		= pvals[1];
@@ -349,11 +357,7 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 	// }
 
 	if(operation == "capable"){
-		// for (int i = 0; i < caps.size(); ++i)
-		// {
-		// 	if(caps[i] == pvals[2])
-		// 		danger += caps[i];
-		// }
+	//	danger += caps[pvals[2]];
 		string capname = pvals[2];
 		string rule = "profile:: " + profile + " rule:: capability " + capname + ",\n";
 		//validate capname first
