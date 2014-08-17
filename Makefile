@@ -3,16 +3,16 @@
 CXXOBJECTS= %.o
 CXX= g++ 
 CXXSOURCES= syslogparse.cpp
-CXXFLAGS= -g -O2 --std=c++0x -Wall -Wextra -pedantic -pthread -fPIC -fPIE -fstack-protector-all -FORTIFY_SOURCE -lseccomp
+CXXFLAGS= -g -O2 --std=c++0x -Wall -Wextra -pedantic -pthread -Wl,-z,relro -Wl,-z,now -fPIC -pie -fPIE -fstack-protector-all -lseccomp
 
 syslogparse : syslogparse.o
-	g++ syslogparse.o -g -O2 --std=c++0x -Wall -Wextra -pedantic -pthread -fPIC -fPIE -fstack-protector-all -FORTIFY_SOURCE -lseccomp -o syslogparse
+	g++ syslogparse.o -g -O2 --std=c++0x -Wall -Wextra -pedantic -pthread -Wl,-z,relro -Wl,-z,now -fPIC -pie -fPIE -fstack-protector-all -lseccomp -o syslogparse
 
 syslogparse.o : syslogparse.cpp
 
 all:
 	cppcheck --enable=all syslogparse.cpp
-	valac --pkg gtk+-3.0 caller.vala
+##	valac --pkg gtk+-3.0 caller.vala
 	make syslogparse
 	rm -f *.o
 
@@ -25,6 +25,6 @@ uninstall:
 
 clean:
 
-	rm -f *.o syslogparse
+	rm -f *.o syslogparse ## caller.c
 
 ## eof Makefile
