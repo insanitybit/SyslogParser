@@ -137,11 +137,12 @@ int main(int argc, char *argv[]){
 	void (*gen)(const vector<string>& pvals, vector<string>& rules);
 
 	if(argc <= 1){
-		cout << "\nPass in either \"apparmor\" or \"iptables\" as a parameter. \n\n";
+		cout << "SyslogParse takes two arguments:\n'iptables' or 'apparmor' (required) \n path to logfile (optional)\n";
 		exit(1);
 	}
 
 	const string dec = argv[1];
+	const char * logfile = argv[2];
 
    	if(dec == "apparmor"){
    		parse = &aaparse;
@@ -152,15 +153,24 @@ int main(int argc, char *argv[]){
 	}else{
 		err(0, "Invalid argument");
 	}
-	
+
+	if(logfile == NULL){ //remember apparmor profile, argv[2] must be readable
+		logfile = "/var/log/syslog";
+	}else{
+		//validate that logfile is in /var/log
+		string lf = logfile;
+		if(lf.substr(0,9) != "/var/log/")
+			err(0, "can only read files in /var/log/");
+	}
+
 	// Check for CPU core count
 	if ((tmpCPU = sysconf( _SC_NPROCESSORS_ONLN )) < 1 || tmpCPU > MAX_CPU)
-		tmpCPU = 2; // If we get some weird response, assume that the system is at least a dual core. It's 2014.
+		tmpCPU = 2; // If we get some weird response, assume that the system is at least a dual core.
 
-	const uint32_t numCPU = 1; //tmpCPU;
+	const uint32_t numCPU = tmpCPU;
 
 	// Get a handle to the file, get its attributes, and then mmap it
-	if ((fd = open("/var/log/syslog", O_RDONLY, 0)) == -1)
+	if ((fd = open(logfile, O_RDONLY, 0)) == -1)
 		err(0, "open on syslog failed :(");
 
 	if(fstat(fd, &buff) == -1)
@@ -179,21 +189,14 @@ int main(int argc, char *argv[]){
 	)
 		err(0, "MAP_FAILED");
 
-	close(fd); 	// we don't need the file descriptor anymore, use buffer from now on
-
-    start = std::chrono::steady_clock::now();
+	close(fd);	// we don't need the file descriptor anymore, use buffer from now on
 
 	const_cast<vector<string>& > (threadbuffs) = chunk(*logbuff, numCPU, buff.st_size);
-
-    end = std::chrono::steady_clock::now();
-	elapsed_seconds = end-start;
-	cout << "chunk::  " << elapsed_seconds.count() * 1000 << "ms" << endl;
 	
 	munmap(logbuff, buff.st_size); 	// no more logbuff. We use threadbuffs now. :)
 
 	vector<std::thread> threads;	
 	vector<vector<string>> parsedvals;
-	start = std::chrono::steady_clock::now();
 
 	// create threads. Pass thread *it, the string from that iterative position. cout << ' ' << *it;
 	for (vector<string>::iterator it = threadbuffs.begin() ; it != threadbuffs.end(); ++it)
@@ -201,13 +204,7 @@ int main(int argc, char *argv[]){
 	// join threads
 	for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
 
-	assert(parsedvals.size() > 0);	
-	
-	end = std::chrono::steady_clock::now();
-	elapsed_seconds = end-start;
-	cout << "parse::  " << elapsed_seconds.count() * 1000 << "ms" << endl;
-	cout << "size::   " << parsedvals.size() << endl;
-	start = std::chrono::steady_clock::now();
+	assert(parsedvals.size() > 0);
 
 	// remove duplicates
 	sort(parsedvals.begin(), parsedvals.end());
@@ -215,13 +212,7 @@ int main(int argc, char *argv[]){
 	it = unique (parsedvals.begin(), parsedvals.end()); 
   	parsedvals.resize( distance(parsedvals.begin(),it) );
 	
-	end = std::chrono::steady_clock::now();
-  	elapsed_seconds = end-start;
-  	cout << "unique:: " << elapsed_seconds.count() * 1000 << "ms" << endl;
-	cout << "size::   " << parsedvals.size() << endl;
-
 	// Begin rule generation
-	start = std::chrono::steady_clock::now();
   	vector<string> rules;
 	threads.clear();
 
@@ -241,16 +232,10 @@ int main(int argc, char *argv[]){
 		for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
 		threads.clear();
 
-	end = std::chrono::steady_clock::now();
-	elapsed_seconds = end-start;
-	cout << "gen::    " << elapsed_seconds.count() * 1000 << "ms" << endl;
-
 //	cout rules
 
 	// for (vector<string>::iterator it = rules.begin() ; it != rules.end(); ++it)
 	// 	cout << *it << endl;
-
-	cout << "\nDONE\n";
 	return 0;	
 }
 
@@ -463,11 +448,11 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 			if(pos1 == string::npos)
 				return;
 			
-			if(attributes[0] == "INPUT" && i == 6){
+			if(i == 6){ //attributes[0] == "INPUT" && 
 				attributes.push_back("SPT");
 				continue;
 			}
-			else if(attributes[0] == "OUTPUT" && i == 7){
+			else if(i == 7){ //attributes[0] == "OUTPUT"  && 
 				attributes.push_back("DPT");
 				continue;
 			}
