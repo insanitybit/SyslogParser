@@ -64,57 +64,15 @@ mutex mtx;
 
 int main(int argc, char *argv[]){
 
-	//Sandboxing
+	//get root, drop to nuprivileged user later
+	if(getuid() != 0)
+		err(0, "Must be run as root user");
 
 	if(prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == -1)
 	 	err(0, "PR_SET_NO_NEW_PRIVS failed");
 
 	if(prctl(PR_SET_DUMPABLE, 0) == -1)
 		err(0, "PR_SET_DUMPABLE failed");
-
-
-	scmp_filter_ctx ctx;
-	ctx = seccomp_init(SCMP_ACT_KILL);
-
-	// rules - TODO: Find rules where filtering parameters is viable
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(rt_sigreturn), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(exit), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(exit_group), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(tgkill), 0);
-
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(access), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(read), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(write), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(fstat), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(open), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(close), 0);
-
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(brk), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(mprotect), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(mmap), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(munmap), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(madvise), 0);
-
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(futex), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(execve), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(clone), 0);
-
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(getrlimit), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(rt_sigaction), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(rt_sigprocmask), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(set_robust_list), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(set_tid_address), 0);
-
-	// seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(prctl), 0);
-	// seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(arch_prctl), 0);
-
-	//for benchmarking
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(clock_gettime), 0);
-
-	if(seccomp_load(ctx) != 0)			//activate filter
-		err(0, "seccomp_load failed"); 
-
-  	//cout << "seccomp: enabled" << endl;
 
 	// real shit
 	int64_t fd = -1;
@@ -167,6 +125,60 @@ int main(int argc, char *argv[]){
 
 	if(fstat(fd, &buff) == -1)
 		err(0, "fstat failed");
+
+	//sandbox
+
+	mkdir("/tmp/syslogparse/", 400);
+
+	if(chroot("/tmp/syslogparse/") != 0)
+		err(0, "chroot failed");
+
+	cout << "successfully chrooted" << endl;
+
+	if (setgid(10000000) != 0)
+        err(0, "setgid failed.");
+    if (setuid(10000000) != 0)
+        err(0, "setuid failed.");
+
+    cout << "successfully dropped GID to " << getgid() << " and UID to " << getuid() << endl;
+	
+	scmp_filter_ctx ctx;
+	ctx = seccomp_init(SCMP_ACT_KILL);
+
+	// rules - TODO: Find rules where filtering parameters is viable
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(rt_sigreturn), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(exit), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(exit_group), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(tgkill), 0);
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(access), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(read), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(write), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(fstat), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(open), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(close), 0);
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(brk), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(mprotect), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(mmap), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(munmap), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(madvise), 0);
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(futex), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(execve), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(clone), 0);
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(getrlimit), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(rt_sigaction), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(rt_sigprocmask), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(set_robust_list), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(set_tid_address), 0);
+
+	if(seccomp_load(ctx) != 0)			//activate filter
+		err(0, "seccomp_load failed"); 
+
+  	cout << "seccomp: enabled" << endl;
+
 
 	if(( logbuff = 
 		static_cast<char*>(mmap(
@@ -227,9 +239,11 @@ int main(int argc, char *argv[]){
 
 //	cout rules
 
-	// for (vector<string>::iterator it = rules.begin() ; it != rules.end(); ++it)
-	// 	cout << *it << endl;
-	return 0;	
+ for (vector<string>::iterator it = rules.begin() ; it != rules.end(); ++it){
+ 	cout << *it << endl;
+ 	break;
+ }
+	return 0;
 }
 
 void ipgen(const vector<string>& pvals, vector<string>& rules){
@@ -377,8 +391,8 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 */
 
 	const string iptables 			= "IPTABLES";
-	const string input 				= "INPUT:";
-	const string output				= "OUTPUT:";
+	const string input 				= "INPUT";
+	const string output				= "OUTPUT";
 	const string in_device			= "IN=";
 	const string out_device			= "OUT=";
 	const string macaddr			= "MAC=";
@@ -431,7 +445,7 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 		pos2 -= pos1;
 		pstr = str.substr(pos1, pos2);
 		attributes.push_back(pstr);
-		if(pstr != "INPUT" && pstr != "OUTPUT")
+		if(pstr != input && pstr != output)
 			break;
 
 
