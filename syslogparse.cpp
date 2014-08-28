@@ -135,9 +135,11 @@ int main(int argc, char *argv[]){
 
 	cout << "successfully chrooted" << endl;
 
-	if (setgid(10000000) != 0)
+	//enumerate users and groups to avoid colliding, hardcode for now to nobody
+
+	if (setgid(65534) != 0)
         err(0, "setgid failed.");
-    if (setuid(10000000) != 0)
+    if (setuid(65534) != 0)
         err(0, "setuid failed.");
 
     cout << "successfully dropped GID to " << getgid() << " and UID to " << getuid() << endl;
@@ -146,6 +148,7 @@ int main(int argc, char *argv[]){
 	ctx = seccomp_init(SCMP_ACT_KILL);
 
 	// rules - TODO: Find rules where filtering parameters is viable
+
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(rt_sigreturn), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(exit), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(exit_group), 0);
@@ -179,13 +182,15 @@ int main(int argc, char *argv[]){
 
   	cout << "seccomp: enabled" << endl;
 
+  	// if(open("/test", 0) == -1)
+  	// 	err(0, "open test: ");
 
 	if(( logbuff = 
 		static_cast<char*>(mmap(
-			NULL,				// OS chooses address
-			buff.st_size,		// Size of file
-			PROT_READ,			// Read only
-			MAP_PRIVATE,		// copy on write
+			NULL,						// OS chooses address
+			buff.st_size,				// Size of file
+			PROT_READ,					// Read only
+			MAP_PRIVATE,				// copy on write
 			fd,
 			0
 			))
@@ -209,7 +214,6 @@ int main(int argc, char *argv[]){
 	for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
 
 	assert(parsedvals.size() > 0);
-
 
 	// remove duplicates
 	sort(parsedvals.begin(), parsedvals.end());
