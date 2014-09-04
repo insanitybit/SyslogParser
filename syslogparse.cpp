@@ -1,4 +1,4 @@
-// Apparmor Rule Parser
+// Apparmor / IPTables Rule Parser
 // Colin O'Brien - insanitybit
 // g++ ./syslogparse.cpp -O0 --std=c++0x -pthread -Wall
 // source available at: https://github.com/insanitybit/SyslogParser
@@ -10,9 +10,10 @@ The goal of this program is to parse the system log for two things:
 The current tools for both of these actions are lacking in terms of both performance and usability.
 */
 
-// seccomp
+// seccomp / rlimit
 #include <sys/prctl.h>     /* prctl */
 #include <seccomp.h>   /* libseccomp */
+#include <sys/resource.h>
 
 // necessary
 #include <limits.h>
@@ -31,9 +32,9 @@ The current tools for both of these actions are lacking in terms of both perform
 #include <map>
 #include <thread>
 #include <mutex>
+#include <linux/futex.h>
 #include <algorithm>
 #include <functional>
-#include <assert.h>
 #include <err.h>
 
 using namespace std;
@@ -126,28 +127,38 @@ int main(int argc, char *argv[]){
 	if(fstat(fd, &buff) == -1)
 		err(0, "fstat failed");
 
-	//sandbox
+	// sandbox
+	// After sandboxing is complete the program will:
+	// 1) Be unable to read/write to the file system
+	// 2) Be unable to create files, regardless of write access
+	// 3) Be able to make ~20 system calls
 
+	// set up chroot
+	
 	mkdir("/tmp/syslogparse/", 400);
 
 	if(chroot("/tmp/syslogparse/") != 0)
 		err(0, "chroot failed");
 
-	cout << "successfully chrooted" << endl;
+	struct rlimit rlp;
+	rlp.rlim_cur = 0;
 
-	//enumerate users and groups to avoid colliding, hardcode for now to nobody
+	if(setrlimit(RLIMIT_FSIZE, &rlp) != 0)
+		err(0, "rlimit failed");
+
+	// hardcode for now to nobody
 
 	if (setgid(65534) != 0)
-        err(0, "setgid failed.");
+		err(0, "setgid failed.");
     if (setuid(65534) != 0)
         err(0, "setuid failed.");
 
-    cout << "successfully dropped GID to " << getgid() << " and UID to " << getuid() << endl;
-	
+    // seccomp
+
 	scmp_filter_ctx ctx;
 	ctx = seccomp_init(SCMP_ACT_KILL);
 
-	// rules - TODO: Find rules where filtering parameters is viable
+	// rules - In Progress: Find rules where filtering parameters is viable
 
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(rt_sigreturn), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(exit), 0);
@@ -155,18 +166,33 @@ int main(int argc, char *argv[]){
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(tgkill), 0);
 
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(access), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(read), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(write), 0);
+//	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(read), 0);
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(write), 1,
+										  SCMP_A0(SCMP_CMP_GE, 1),
+										  SCMP_A0(SCMP_CMP_LE, 2)
+										  );
+
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(fstat), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(open), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(close), 0);
 
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(brk), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(mprotect), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(mmap), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(munmap), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(madvise), 0);
 
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(mprotect),  1,
+										  SCMP_A2(SCMP_CMP_NE, PROT_EXEC)
+										  );
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(mmap),  2,
+										  SCMP_A0(SCMP_CMP_EQ, NULL),
+										  SCMP_A5(SCMP_CMP_EQ, 0)
+										  );
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(munmap), 1,
+										  SCMP_A0(SCMP_CMP_NE, NULL),
+										  SCMP_A1(SCMP_CMP_GE, 0)
+										  );
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(madvise), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(futex), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(execve), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(clone), 0);
@@ -180,10 +206,7 @@ int main(int argc, char *argv[]){
 	if(seccomp_load(ctx) != 0)			//activate filter
 		err(0, "seccomp_load failed"); 
 
-  	cout << "seccomp: enabled" << endl;
-
-  	// if(open("/test", 0) == -1)
-  	// 	err(0, "open test: ");
+  	// sandbox complete
 
 	if(( logbuff = 
 		static_cast<char*>(mmap(
@@ -207,20 +230,21 @@ int main(int argc, char *argv[]){
 	vector<std::thread> threads;	
 	vector<vector<string>> parsedvals;
 
-	// create threads. Pass thread *it, the string from that iterative position. cout << ' ' << *it;
 	for (vector<string>::iterator it = threadbuffs.begin() ; it != threadbuffs.end(); ++it)
 		threads.push_back(thread(parse, std::cref(*it), std::ref(parsedvals)));
-	// join threads
+
 	for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
 
-	assert(parsedvals.size() > 0);
+	if(parsedvals.size() < 1)
+		err(0, "parsedvals.size() < 1");
 
-	// remove duplicates
 	sort(parsedvals.begin(), parsedvals.end());
 	vector<vector<string> >::iterator it;
 	it = unique (parsedvals.begin(), parsedvals.end()); 
   	parsedvals.resize( distance(parsedvals.begin(),it) );
 	//cout << parsedvals.size() << endl;
+
+
 	// Begin rule generation
   	vector<string> rules;
 	threads.clear();
@@ -245,7 +269,6 @@ int main(int argc, char *argv[]){
 
  for (vector<string>::iterator it = rules.begin() ; it != rules.end(); ++it){
  	cout << *it << endl;
- 	break;
  }
 	return 0;
 }
@@ -266,7 +289,6 @@ void ipgen(const vector<string>& pvals, vector<string>& rules){
 	const string destination_port	= " --dport ";
 
 	string rule = "";
-	mtx.lock();
 	if(pvals[0] == "INPUT"){							
 				rule  = iptables + input +
 						in_device + pvals[1] +
@@ -284,7 +306,7 @@ void ipgen(const vector<string>& pvals, vector<string>& rules){
 	}else{
 		err(0, "pvals[0] is not right.");
 	}
-	mtx.unlock();
+	
 	mtx.lock();
 	rules.push_back(rule);
 	mtx.unlock();
@@ -417,10 +439,10 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 									destination_port
 									};
 	size_t i;
-	size_t aapos;		// position of apparmor statement beginning
-	size_t laapos = 0;	// position of the previous apparmor statement beginning
-	size_t pos1;		// beginning of string we want to snip
-	size_t pos2;		// end of string we want to snip
+	size_t aapos;
+	size_t laapos = 0;
+	size_t pos1;
+	size_t pos2;
 	string pstr;
 
 	vector<string> attributes;
@@ -459,7 +481,7 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 			if(pos1 == string::npos)
 				return;
 			
-			if(i == 6){ //attributes[0] == "INPUT" && 
+			if(i == 6){ //
 				attributes.push_back("SPT");
 				continue;
 			}
