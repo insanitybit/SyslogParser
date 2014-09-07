@@ -11,7 +11,7 @@ __Features__
 
 * Threaded where possible, performance increase is considerable with even a dual core CPU.
 * Generation of iptables and apparmor rules.
-* Makes use of sandboxing. Currently seccomp sandboxing, no-write chroot, and an apparmor profile.
+* Makes use of sandboxing. Chroot, capabilities, DAC, MAC, seccomp.
 
 __Goals__
 
@@ -20,11 +20,6 @@ The goal of this program is to sort through the system log, find iptables and ap
 All of this is done within a threaded, sandboxed process.
 
 
-__TODO__
-
-* Work on further sandboxing - right now it has to be run as root, but it should drop privileges.
-* Validate rules on parent side - child is in apparmor profile, don't allow modification of that profile. Not started.
-
 __Build Instructions__
 
 ```
@@ -32,4 +27,6 @@ $ make all
 $ sudo make install
 
 run with syslogparse [parameter]
+
+requires libseccomp and libcap-ng. Both can be installed by apt or compiled from source.
 ```
