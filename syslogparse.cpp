@@ -10,10 +10,12 @@ The goal of this program is to parse the system log for two things:
 The current tools for both of these actions are lacking in terms of both performance and usability.
 */
 
-// seccomp / rlimit
-#include <sys/prctl.h>     /* prctl */
-#include <seccomp.h>   /* libseccomp */
+// seccomp / rlimit / caps
+#include <sys/prctl.h>
+#include <seccomp.h>
 #include <sys/resource.h>
+#include <linux/capability.h>
+#include <cap-ng.h>
 
 // necessary
 #include <limits.h>
@@ -74,6 +76,10 @@ int main(int argc, char *argv[]){
 
 	if(prctl(PR_SET_DUMPABLE, 0) == -1)
 		err(0, "PR_SET_DUMPABLE failed");
+
+	capng_clear(CAPNG_SELECT_BOTH);
+	capng_updatev(CAPNG_ADD, (capng_type_t)(CAPNG_EFFECTIVE | CAPNG_PERMITTED), CAP_SETUID, CAP_SETGID, CAP_SYS_CHROOT, CAP_DAC_READ_SEARCH, -1);
+	capng_apply(CAPNG_SELECT_BOTH);
 
 	// real shit
 	int64_t fd = -1;
@@ -188,7 +194,7 @@ int main(int argc, char *argv[]){
 										  SCMP_A5(SCMP_CMP_EQ, 0)
 										  );
 
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(munmap), 1,
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(munmap), 2,
 										  SCMP_A0(SCMP_CMP_NE, NULL),
 										  SCMP_A1(SCMP_CMP_GE, 0)
 										  );
@@ -244,7 +250,6 @@ int main(int argc, char *argv[]){
   	parsedvals.resize( distance(parsedvals.begin(),it) );
 	//cout << parsedvals.size() << endl;
 
-
 	// Begin rule generation
   	vector<string> rules;
 	threads.clear();
@@ -253,7 +258,7 @@ int main(int argc, char *argv[]){
 		// create threads numCPU at a time
 		for(i = 0; i < numCPU; i++){
 			threads.push_back(thread(gen, std::cref(*it), std::ref(rules)));
-			if(it != parsedvals.end() - 1)//Last one? Iterate, push, and break
+			if(it != parsedvals.end() - 1)	// Last one? Iterate, push, and break
 				++it;
 			else
 				break;
@@ -378,7 +383,7 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 	//	danger += caps[pvals[2]];
 		string capname = pvals[2];
 		string rule = "profile:: " + profile + " rule:: capability " + capname + ",\n";
-		//validate capname first
+		// validate capname first
 		mtx.lock();
 		rules.push_back(rule);
 		mtx.unlock();
@@ -389,7 +394,7 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 	string denied_mask = pvals[3];
 
 	size_t cpos;
-	if((cpos = profile.find("///")) == string::npos){ //no child found
+	if((cpos = profile.find("///")) == string::npos){ // no child found
 		string rule = "profile:: " + profile + " child:: NULL rule:: " + name + " " + denied_mask + ",\n";
 		mtx.lock();
 		rules.push_back(rule);
@@ -398,7 +403,7 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 	}
 
 	//get the child path
-	string child = profile.substr((cpos + 2), profile.length());
+	string child = profile.substr((cpos + 2), profile.length()); 	// use magic 2 to get past the /s
 	profile = profile.substr(0, cpos);
 	string rule = "profile:: " + profile + " child:: " + child + " rule:: " + name + " " + denied_mask + ",\n";
 	mtx.lock();
@@ -453,18 +458,18 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 
 	while(true){
 		// find apparmor violation
-		aapos = str.find(iptables, laapos); //point to beginning of IPTABLES
+		aapos = str.find(iptables, laapos); // point to beginning of IPTABLES
 		if(aapos == string::npos)
 			return;
 
-		aapos += iptables.length();			//point to end of IPTABLEs
+		aapos += iptables.length();			// point to end of IPTABLEs
 		laapos = aapos;
 		
 		// is this input or output
-		pos1 = str.find(iptables, aapos); 	//point to beginning of INPUT: or OUTPUT:
+		pos1 = str.find(iptables, aapos); 	// point to beginning of INPUT: or OUTPUT:
 		if(pos1 == string::npos)
 			break;
-		pos1 += iptables.length();			//point to end of INPUT or OUTPUT:
+		pos1 += iptables.length();			// point to end of INPUT or OUTPUT:
 		pos2 = str.find(":", pos1);
 		if(pos2 == string::npos)
 			break;
@@ -485,7 +490,7 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 				attributes.push_back("SPT");
 				continue;
 			}
-			else if(i == 7){ //attributes[0] == "OUTPUT"  && 
+			else if(i == 7){ // attributes[0] == "OUTPUT"  && 
 				attributes.push_back("DPT");
 				continue;
 			}

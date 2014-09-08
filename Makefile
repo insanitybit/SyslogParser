@@ -3,25 +3,19 @@
 CXXOBJECTS= %.o
 CXX= g++ 
 CXXSOURCES= syslogparse.cpp
-CXXFLAGS= -O2 --std=c++0x -Wall -Wextra -pedantic -pthread
-CXXFLAGS+= -Wl,-z,relro,-z,now,-z,noexecstack -fPIC -pie -fPIE -fstack-protector-all -lseccomp
+CXXFLAGS= -O3 -mfpmath=sse -msse2 --std=c++0x -Wall -Wextra -pedantic -pthread
+CXXFLAGS+= -Wl,-z,relro,-z,now,-z,noexecstack -fPIC -pie -fPIE -fstack-protector-all -lseccomp -lcap-ng
 
 
 syslogparse : syslogparse.o
-	g++ syslogparse.o -O2 --std=c++0x -Wall -Wextra -pedantic -pthread -Wl,-z,relro,-z,now,-z,noexecstack -fPIC -pie -fPIE -fstack-protector-all -lseccomp -o syslogparse
+	g++ syslogparse.o -O3 -mfpmath=sse -msse2 --std=c++0x -Wall -Wextra -pedantic -pthread -Wl,-z,relro,-z,now,-z,noexecstack -fPIC -pie -fPIE -fstack-protector-all -lseccomp -lcap-ng -o syslogparse
 
 syslogparse.o : syslogparse.cpp
 
 all:
-	echo "\n\n\n"
-
-	cppcheck --enable=all syslogparse.cpp
-	echo "\n\n\n"
-
+	#### cppcheck --enable=all syslogparse.cpp
+	
 	make syslogparse
-	echo "\n\n\n"
-
-	#valac --enable-checking --pkg gtk+-3.0 caller.vala -X -O2 -X -fPIC -X -pie -X -fPIE -X -fstack-protector-all -X -Wl,-z,relro,-z,now,-z,noexecstack
 
 	rm -f *.o
 
@@ -31,9 +25,10 @@ install:
 
 uninstall:
 	rm -f /usr/bin/syslogparse
+	rm -f /etc/apparmor.d/usr.bin.syslogparse
 
 clean:
 
-	rm -f *.o syslogparse caller caller.c
+	rm -f *.o syslogparse
 
 ## eof Makefile
