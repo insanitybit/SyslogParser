@@ -1,6 +1,6 @@
 // Apparmor / IPTables Rule Parser
 // Colin O'Brien - insanitybit
-// g++ ./syslogparse.cpp -O0 --std=c++0x -pthread -Wall
+// $make all
 // source available at: https://github.com/insanitybit/SyslogParser
 /*
 The goal of this program is to parse the system log for two things:
@@ -68,7 +68,8 @@ mutex mtx;
 int main(int argc, char *argv[]){
 
 	//get root, drop to nuprivileged user later
-	if(getuid() != 0)
+	
+	if(getuid())
 		err(0, "Must be run as root user");
 
 	if(prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == -1)
@@ -140,23 +141,26 @@ int main(int argc, char *argv[]){
 	// 3) Be able to make ~20 system calls
 
 	// set up chroot
-	
+
+
 	mkdir("/tmp/syslogparse/", 400);
 
-	if(chroot("/tmp/syslogparse/") != 0)
+	chdir("/tmp/syslogparse/");
+	
+	if(chroot("/tmp/syslogparse/"))
 		err(0, "chroot failed");
 
 	struct rlimit rlp;
 	rlp.rlim_cur = 0;
 
-	if(setrlimit(RLIMIT_FSIZE, &rlp) != 0)
+	if(setrlimit(RLIMIT_FSIZE, &rlp))
 		err(0, "rlimit failed");
 
 	// hardcode for now to nobody
 
-	if (setgid(65534) != 0)
+	if (setgid(65534))
 		err(0, "setgid failed.");
-    if (setuid(65534) != 0)
+    if (setuid(65534))
         err(0, "setuid failed.");
 
     // seccomp
@@ -209,7 +213,7 @@ int main(int argc, char *argv[]){
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(set_robust_list), 0);
 	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(set_tid_address), 0);
 
-	if(seccomp_load(ctx) != 0)			//activate filter
+	if(seccomp_load(ctx))			//activate filter
 		err(0, "seccomp_load failed"); 
 
   	// sandbox complete
@@ -413,13 +417,10 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 }
 
 void ipparse(const string &str, vector<vector<string> >& parsedvals){
+// IPTABLESINPUT: IN=lo OUT= MAC=00:**:** SRC=127.0.0.1 DST=127.0.0.1 
+// LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=220 
 
-/*
-IPTABLESINPUT: IN=lo OUT= MAC=00:**:** SRC=127.0.0.1 DST=127.0.0.1 
-LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=220 
-
-[direction][device][mac][srcip][dstip][protocol][srcport][destport]
-*/
+// [direction][device][mac][srcip][dstip][protocol][srcport][destport]
 
 	const string iptables 			= "IPTABLES";
 	const string input 				= "INPUT";
@@ -486,14 +487,14 @@ LEN=240 TOS=0x00 PREC=0x00 TTL=64 ID=10566 DF PROTO=UDP SPT=42102 DPT=123 LEN=22
 			if(pos1 == string::npos)
 				return;
 			
-			if(i == 6){ //
-				attributes.push_back("SPT");
-				continue;
-			}
-			else if(i == 7){ // attributes[0] == "OUTPUT"  && 
-				attributes.push_back("DPT");
-				continue;
-			}
+			// if(i == 6){ //
+			// 	attributes.push_back("SPT");
+			// 	continue;
+			// }
+			// else if(i == 7){ // attributes[0] == "OUTPUT"  && 
+			// 	attributes.push_back("DPT");
+			// 	continue;
+			// }
 			if(i == 2){
 				attributes.push_back("MAC"); 	// MAC is annoying and unimportant for security.
 				continue;						// Plus, removing makes unique() far more effective
@@ -616,7 +617,6 @@ void aaparse(const string &str, vector<vector<string> >& parsedvals){
 }
 
 vector<string> chunk(const char &buff, const uint32_t numCPU, const size_t length){
-
 	size_t i;
 	uint8_t j;
 	size_t lp = 1;
