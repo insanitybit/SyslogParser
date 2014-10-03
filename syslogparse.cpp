@@ -10,13 +10,17 @@ The goal of this program is to parse the system log for two things:
 The current tools for both of these actions are lacking in terms of both performance and usability.
 */
 
-// seccomp / rlimit / caps
+// seccomp / rlimit / caps / namespace / rand UID
 #include <sys/prctl.h>
 #include <seccomp.h>
 #include <sys/resource.h>
 #include <linux/capability.h>
 #include <cap-ng.h>
-
+#include <sched.h>
+#include <grp.h>
+#include <pwd.h> 
+#include <time.h>
+#include <fstream>
 // necessary
 #include <limits.h>
 #include <stdio.h>
@@ -46,7 +50,7 @@ chunk() takes in the mmap'd file buffer, CPU count, and size of the buffer. It s
 CPUcount chunks and returns a vector 'chunks'.
 */
 
-vector <string> chunk(const char &buff, const uint32_t numCPU, const size_t length);
+vector <string> chunk(const string &buff, const uint32_t numCPU, const size_t length);
 
 /*
 Parser fn's will take in the vector from chunks. They parse this and pull out a vector
@@ -79,16 +83,14 @@ int main(int argc, char *argv[]){
 		err(0, "PR_SET_DUMPABLE failed");
 
 	capng_clear(CAPNG_SELECT_BOTH);
-	capng_updatev(CAPNG_ADD, (capng_type_t)(CAPNG_EFFECTIVE | CAPNG_PERMITTED), CAP_SETUID, CAP_SETGID, CAP_SYS_CHROOT, CAP_DAC_READ_SEARCH, -1);
+	capng_updatev(CAPNG_ADD, (capng_type_t)(CAPNG_EFFECTIVE | CAPNG_PERMITTED),CAP_SYS_ADMIN, CAP_SETUID, CAP_SETGID, CAP_SYS_CHROOT, CAP_DAC_READ_SEARCH, -1);
 	capng_apply(CAPNG_SELECT_BOTH);
 
 	// real shit
-	int64_t fd = -1;
 	uint32_t tmpCPU;	
-	uint32_t MAX_CPU = 7600; //TODO: /proc/sys/kernel/threads-max - currently a worst case
+	uint32_t MAX_CPU;// = 7600; //TODO: /proc/sys/kernel/threads-max - currently a worst case
 	size_t i;
-	struct stat buff;
-	char * logbuff;
+	string logbuff;
 	vector<string> threadbuffs;
 	
 	void (*parse)(const string &str, vector<vector<string> >& parsedvals);
@@ -121,18 +123,33 @@ int main(int argc, char *argv[]){
 			err(0, "can only read files in /var/log/");
 	}
 
+	// set MAX_CPU
+	ifstream file("/proc/sys/kernel/threads-max");
+	string tmp;
+	getline(file, tmp);
+	MAX_CPU = atoi(tmp.c_str());
+	file.close();
+
 	// Check for CPU core count
 	if ((tmpCPU = sysconf( _SC_NPROCESSORS_ONLN )) < 1 || tmpCPU > MAX_CPU)
 		tmpCPU = 2; // If we get some weird response, assume that the system is at least a dual core.
 
 	const uint32_t numCPU = tmpCPU;
 
-	// Get a handle to the file, get its attributes, and then mmap it
-	if ((fd = open(logfile, O_RDONLY, 0)) == -1)
-		err(0, "open on syslog failed :(");
+	ifstream logf(logfile);
 
-	if(fstat(fd, &buff) == -1)
-		err(0, "fstat failed");
+	if(!logf)
+		err(0, "log open failed");
+	size_t logsize = logf.tellg();
+
+	logf.seekg(0, ios::end);   
+	logbuff.reserve(logsize);
+	logf.seekg(0, ios::beg);
+
+	logbuff.assign((istreambuf_iterator<char>(logf)),
+	            istreambuf_iterator<char>());
+
+	logf.close();
 
 	// sandbox
 	// After sandboxing is complete the program will:
@@ -140,12 +157,41 @@ int main(int argc, char *argv[]){
 	// 2) Be unable to create files, regardless of write access
 	// 3) Be able to make ~20 system calls
 
-	// set up chroot
+	uint64_t seed;
+	ifstream rfile("/dev/urandom");
+	
+	rfile.read(reinterpret_cast<char*>(&seed), sizeof(seed));
 
+	rfile.close();
+	srand(seed);
+
+	passwd 	*ps;
+	group 	*gr;
+
+	uid_t uid = (rand()%4294967296) + 1;
+	gid_t gid = (rand()%4294967296) + 1;
+
+	while(true){
+		if((ps = getpwuid(uid)) == NULL)
+	 		break;
+	 	uid = (rand()%4294967296) + 1;
+	}
+
+	while(true){
+		if((gr = getgrgid(gid)) == NULL)
+			break;
+		gid = (rand()%4294967296) + 1;
+	}
+
+	if(unshare((CLONE_NEWIPC | CLONE_NEWNS | CLONE_FILES)))
+		err(0, "unshare failed");
+
+	// set up chroot
 
 	mkdir("/tmp/syslogparse/", 400);
 
-	chdir("/tmp/syslogparse/");
+	if(chdir("/tmp/syslogparse/"))
+		err(0, "chdir failed");
 	
 	if(chroot("/tmp/syslogparse/"))
 		err(0, "chroot failed");
@@ -157,11 +203,16 @@ int main(int argc, char *argv[]){
 		err(0, "rlimit failed");
 
 	// hardcode for now to nobody
+	// TODO: find nonexistant user, drop to that instead
 
-	if (setgid(65534))
+	if (setgid(gid))
 		err(0, "setgid failed.");
-    if (setuid(65534))
+    if (setuid(uid))
         err(0, "setuid failed.");
+
+    cout << "GID = " << getgid() << endl;
+
+    cout << "UID = " << getuid() << endl;
 
     // seccomp
 
@@ -218,25 +269,8 @@ int main(int argc, char *argv[]){
 
   	// sandbox complete
 
-	if(( logbuff = 
-		static_cast<char*>(mmap(
-			NULL,						// OS chooses address
-			buff.st_size,				// Size of file
-			PROT_READ,					// Read only
-			MAP_PRIVATE,				// copy on write
-			fd,
-			0
-			))
-		) == MAP_FAILED
-	)
-		err(0, "MAP_FAILED");
-
-	close(fd);	// we don't need the file descriptor anymore, use buffer from now on
-
-	const_cast<vector<string>& > (threadbuffs) = chunk(*logbuff, numCPU, buff.st_size);
+	const_cast<vector<string>& > (threadbuffs) = chunk(logbuff, numCPU, logsize);
 	
-	munmap(logbuff, buff.st_size); 	// no more logbuff. We use threadbuffs now. :)
-
 	vector<std::thread> threads;	
 	vector<vector<string>> parsedvals;
 
@@ -276,9 +310,9 @@ int main(int argc, char *argv[]){
 
 //	cout rules
 
- for (vector<string>::iterator it = rules.begin() ; it != rules.end(); ++it){
- 	cout << *it << endl;
- }
+	 for (vector<string>::iterator it = rules.begin() ; it != rules.end(); ++it)
+	 	cout << *it << endl;
+
 	return 0;
 }
 
@@ -299,19 +333,19 @@ void ipgen(const vector<string>& pvals, vector<string>& rules){
 
 	string rule = "";
 	if(pvals[0] == "INPUT"){							
-				rule  = iptables + input +
-						in_device + pvals[1] +
-						source + pvals[4] +
-						destination + pvals[5] +
-						protocol + pvals[6] +
-						destination_port + pvals[7];
+				rule  = iptables 	+ 		input 
+				+		in_device 	+ 		pvals[1] 
+				+		source 		+ 		pvals[4] 
+				+		destination + 		pvals[5] 
+				+		protocol 	+ 		pvals[6] 
+				+		destination_port +	pvals[7];
 	}else if(pvals[0] == "OUTPUT"){
-				rule  = iptables + output
-					+	out_device + pvals[1]
-					+	source + pvals[4]
-					+	destination + pvals[5]
-				 	+	protocol + pvals[6]
-				 	+	source_port + pvals[7];
+				rule  = iptables 	+ 	output
+				+		out_device 	+ 	pvals[1]
+				+		source 		+ 	pvals[4]
+				+		destination + 	pvals[5]
+				+		protocol	+	pvals[6]
+				+		source_port +	pvals[7];
 	}else{
 		err(0, "pvals[0] is not right.");
 	}
@@ -616,24 +650,23 @@ void aaparse(const string &str, vector<vector<string> >& parsedvals){
 	}
 }
 
-vector<string> chunk(const char &buff, const uint32_t numCPU, const size_t length){
+vector<string> chunk(const string &buff, const uint32_t numCPU, const size_t length){
 	size_t i;
 	uint8_t j;
 	size_t lp = 1;
-	const string ch (&buff);
 	vector<string> chunks;
 	string rbuff;
 
 	for(j = 1; j <= numCPU; j++) {
 		i = (static_cast<float>(length) * (static_cast<float>(j) / static_cast<float>(numCPU)));
- 		i = ch.find('\n', i);
+ 		i = buff.find('\n', i);
  		if(i == string::npos){			// If we search for \n but don't find it
  			i = (length - 1);
-			rbuff = ch.substr(lp, (i - lp));
+			rbuff = buff.substr(lp, (i - lp));
 			chunks.push_back(rbuff);
 			return chunks;
  		}
-		rbuff = ch.substr(lp, (i - lp));
+		rbuff = buff.substr(lp, (i - lp));
 		lp = i + 1; 					// lp is equal to the character AFTER the new line
 		chunks.push_back(rbuff);
  	}
