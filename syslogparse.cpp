@@ -67,11 +67,11 @@ within a vector and generate the logical rule for that vector.
 void aagen(const vector<string>& pvals, vector<string>& rules);
 void ipgen(const vector<string>& pvals, vector<string>& rules);
 
+void sandbox();
+
 mutex mtx;
 
 int main(int argc, char *argv[]){
-
-	//get root, drop to nuprivileged user later
 	
 	if(getuid())
 		err(0, "Must be run as root user");
@@ -86,9 +86,7 @@ int main(int argc, char *argv[]){
 	capng_updatev(CAPNG_ADD, (capng_type_t)(CAPNG_EFFECTIVE | CAPNG_PERMITTED),CAP_SYS_ADMIN, CAP_SETUID, CAP_SETGID, CAP_SYS_CHROOT, CAP_DAC_READ_SEARCH, -1);
 	capng_apply(CAPNG_SELECT_BOTH);
 
-	// real shit
-	uint32_t tmpCPU;	
-	uint32_t MAX_CPU;// = 7600; //TODO: /proc/sys/kernel/threads-max - currently a worst case
+	uint32_t MAX_CPU;
 	size_t i;
 	string logbuff;
 	vector<string> threadbuffs;
@@ -114,10 +112,10 @@ int main(int argc, char *argv[]){
 		err(0, "Invalid argument");
 	}
 
-	if(logfile == NULL){ //remember apparmor profile, argv[2] must be readable
+	if(logfile == NULL){ // remember apparmor profile, argv[2] must be readable
 		logfile = "/var/log/syslog";
 	}else{
-		//validate that logfile is in /var/log
+		// validate that logfile is in /var/log - sandboxing will prevent reading from anywhere else!
 		string lf = logfile;
 		if(lf.substr(0,9) != "/var/log/")
 			err(0, "can only read files in /var/log/");
@@ -125,21 +123,26 @@ int main(int argc, char *argv[]){
 
 	// set MAX_CPU
 	ifstream file("/proc/sys/kernel/threads-max");
-	string tmp;
-	getline(file, tmp);
-	MAX_CPU = atoi(tmp.c_str());
-	file.close();
+
+	if(file){
+		string tmp;
+		getline(file, tmp);
+		MAX_CPU = atoi(tmp.c_str());
+		file.close();
+	}else{
+		MAX_CPU = 512;
+	}
 
 	// Check for CPU core count
-	if ((tmpCPU = sysconf( _SC_NPROCESSORS_ONLN )) < 1 || tmpCPU > MAX_CPU)
-		tmpCPU = 2; // If we get some weird response, assume that the system is at least a dual core.
-
-	const uint32_t numCPU = tmpCPU;
+	size_t numCPU = sysconf( _SC_NPROCESSORS_ONLN );
+	if ((numCPU < 1) || (numCPU > MAX_CPU))
+			numCPU = 2; // If we get some weird response, assume that the system is at least a dual core.
 
 	ifstream logf(logfile);
 
 	if(!logf)
 		err(0, "log open failed");
+	
 	size_t logsize = logf.tellg();
 
 	logf.seekg(0, ios::end);   
@@ -151,123 +154,7 @@ int main(int argc, char *argv[]){
 
 	logf.close();
 
-	// sandbox
-	// After sandboxing is complete the program will:
-	// 1) Be unable to read/write to the file system
-	// 2) Be unable to create files, regardless of write access
-	// 3) Be able to make ~20 system calls
-
-	uint64_t seed;
-	ifstream rfile("/dev/urandom");
-	
-	rfile.read(reinterpret_cast<char*>(&seed), sizeof(seed));
-
-	rfile.close();
-	srand(seed);
-
-	passwd 	*ps;
-	group 	*gr;
-
-	uid_t uid = (rand()%4294967296) + 1;
-	gid_t gid = (rand()%4294967296) + 1;
-
-	while(true){
-		if((ps = getpwuid(uid)) == NULL)
-	 		break;
-	 	uid = (rand()%4294967296) + 1;
-	}
-
-	while(true){
-		if((gr = getgrgid(gid)) == NULL)
-			break;
-		gid = (rand()%4294967296) + 1;
-	}
-
-	if(unshare((CLONE_NEWIPC | CLONE_NEWNS | CLONE_FILES)))
-		err(0, "unshare failed");
-
-	// set up chroot
-
-	mkdir("/tmp/syslogparse/", 400);
-
-	if(chdir("/tmp/syslogparse/"))
-		err(0, "chdir failed");
-	
-	if(chroot("/tmp/syslogparse/"))
-		err(0, "chroot failed");
-
-	struct rlimit rlp;
-	rlp.rlim_cur = 0;
-
-	if(setrlimit(RLIMIT_FSIZE, &rlp))
-		err(0, "rlimit failed");
-
-	// hardcode for now to nobody
-	// TODO: find nonexistant user, drop to that instead
-
-	if (setgid(gid))
-		err(0, "setgid failed.");
-    if (setuid(uid))
-        err(0, "setuid failed.");
-
-    cout << "GID = " << getgid() << endl;
-
-    cout << "UID = " << getuid() << endl;
-
-    // seccomp
-
-	scmp_filter_ctx ctx;
-	ctx = seccomp_init(SCMP_ACT_KILL);
-
-	// rules - In Progress: Find rules where filtering parameters is viable
-
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(rt_sigreturn), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(exit), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(exit_group), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(tgkill), 0);
-
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(access), 0);
-//	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(read), 0);
-
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(write), 1,
-										  SCMP_A0(SCMP_CMP_GE, 1),
-										  SCMP_A0(SCMP_CMP_LE, 2)
-										  );
-
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(fstat), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(open), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(close), 0);
-
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(brk), 0);
-
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(mprotect),  1,
-										  SCMP_A2(SCMP_CMP_NE, PROT_EXEC)
-										  );
-
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(mmap),  2,
-										  SCMP_A0(SCMP_CMP_EQ, NULL),
-										  SCMP_A5(SCMP_CMP_EQ, 0)
-										  );
-
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(munmap), 2,
-										  SCMP_A0(SCMP_CMP_NE, NULL),
-										  SCMP_A1(SCMP_CMP_GE, 0)
-										  );
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(madvise), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(futex), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(execve), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(clone), 0);
-
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(getrlimit), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(rt_sigaction), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(rt_sigprocmask), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(set_robust_list), 0);
-	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(set_tid_address), 0);
-
-	if(seccomp_load(ctx))			//activate filter
-		err(0, "seccomp_load failed"); 
-
-  	// sandbox complete
+	sandbox();
 
 	const_cast<vector<string>& > (threadbuffs) = chunk(logbuff, numCPU, logsize);
 	
@@ -308,7 +195,7 @@ int main(int argc, char *argv[]){
 		for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
 		threads.clear();
 
-//	cout rules
+	// cout rules
 
 	 for (vector<string>::iterator it = rules.begin() ; it != rules.end(); ++it)
 	 	cout << *it << endl;
@@ -347,7 +234,7 @@ void ipgen(const vector<string>& pvals, vector<string>& rules){
 				+		protocol	+	pvals[6]
 				+		source_port +	pvals[7];
 	}else{
-		err(0, "pvals[0] is not right.");
+		err(0, "pvals[0] is not INPUT or OUTPUT.");
 	}
 	
 	mtx.lock();
@@ -439,8 +326,7 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 		mtx.unlock();
 		return;
 	}
-
-	//get the child path
+	// get the child path
 	string child = profile.substr((cpos + 2), profile.length()); 	// use magic 2 to get past the /s
 	profile = profile.substr(0, cpos);
 	string rule = "profile:: " + profile + " child:: " + child + " rule:: " + name + " " + denied_mask + ",\n";
@@ -671,4 +557,114 @@ vector<string> chunk(const string &buff, const uint32_t numCPU, const size_t len
 		chunks.push_back(rbuff);
  	}
 return chunks;
+}
+
+void sandbox(){
+
+	uint64_t seed;
+	ifstream rfile("/dev/urandom");
+	
+	rfile.read(reinterpret_cast<char*>(&seed), sizeof(seed));
+
+	rfile.close();
+	//cout << seed << endl;
+	srand(seed);
+
+	passwd 	*ps;
+	group 	*gr;
+
+	uid_t uid = (rand()%4294967296) + 1;
+	gid_t gid = (rand()%4294967296) + 1;
+
+	while((ps = getpwuid(uid)) != NULL)
+	 	uid = (rand()%4294967296) + 1;
+
+	while((gr = getgrgid(gid)) != NULL)
+		gid = (rand()%4294967296) + 1;
+	
+	// Namespaces
+	if(unshare((CLONE_NEWIPC | CLONE_NEWNS | CLONE_FILES)))
+		err(0, "unshare failed");
+
+	// set up chroot
+
+	mkdir("/tmp/syslogparse/", 400);
+
+	if(chdir("/tmp/syslogparse/"))
+		err(0, "chdir failed");
+	
+	if(chroot("/tmp/syslogparse/"))
+		err(0, "chroot failed");
+
+	// Prevent all file writes... again. 
+	struct rlimit rlp;
+	rlp.rlim_cur = 0;
+
+	if(setrlimit(RLIMIT_FSIZE, &rlp))
+		err(0, "rlimit failed");
+
+	if (setgid(gid))
+		err(0, "setgid failed.");
+    if (setuid(uid))
+        err(0, "setuid failed.");
+
+    // cout << "GID = " << getgid() << endl;
+
+    // cout << "UID = " << getuid() << endl;
+
+    // seccomp
+
+	scmp_filter_ctx ctx;
+	ctx = seccomp_init(SCMP_ACT_KILL);
+
+	// rules - In Progress: Find rules where filtering parameters is viable
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(rt_sigreturn), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(exit), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(exit_group), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(tgkill), 0);
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(access), 0);
+//	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(read), 0);
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(write), 1,
+										  SCMP_A0(SCMP_CMP_GE, 1),
+										  SCMP_A0(SCMP_CMP_LE, 2)
+										  );
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(fstat), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(open), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(close), 0);
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(brk), 0);
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(mprotect),  1,
+										  SCMP_A2(SCMP_CMP_NE, PROT_EXEC)
+										  );
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(mmap),  2,
+										  SCMP_A0(SCMP_CMP_EQ, 0),
+										  SCMP_A5(SCMP_CMP_EQ, 0)
+										  );
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(munmap), 2,
+										  SCMP_A0(SCMP_CMP_NE, 0),
+										  SCMP_A1(SCMP_CMP_GE, 0)
+										  );
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(madvise), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(futex), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(execve), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(clone), 0);
+
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(getrlimit), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(rt_sigaction), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(rt_sigprocmask), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(set_robust_list), 0);
+	seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(set_tid_address), 0);
+
+	if(seccomp_load(ctx))			//activate filter
+		err(0, "seccomp_load failed"); 
+
+  	// sandbox complete
+
 }
