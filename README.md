@@ -9,9 +9,9 @@ The apparmor tools are totally broken on every system I've used. They break very
 
 __Features__
 
-* Threaded where possible, performance increase is considerable with even a dual core CPU.
+* Threaded where possible (note there's a current bottleneck I'm addressing, threaded performance is now worse), --performance increase is considerable with even a dual core CPU in my tests--.
 * Generation of iptables and apparmor rules.
-* Makes use of sandboxing. Chroot, capabilities, DAC, MAC, seccomp.
+* Makes use of sandboxing. Chroot, capabilities, DAC, MAC, seccomp, etc.
 
 __Goals__
 
@@ -26,7 +26,7 @@ __Build Instructions__
 $ make all
 $ sudo make install
 
-run with syslogparse [parameter]
+run with syslogparse [parameter] [path] 
 
 requires libseccomp and libcap-ng. Both can be installed by apt or compiled from source.
 ```
