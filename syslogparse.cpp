@@ -10,6 +10,7 @@ The goal of this program is to parse the system log for two things:
 The current tools for both of these actions are lacking in terms of both performance and usability.
 */
 
+#include <chrono>
 // seccomp / rlimit / caps / namespace / rand UID
 #include <sys/prctl.h>
 #include <seccomp.h>
@@ -35,6 +36,7 @@ The current tools for both of these actions are lacking in terms of both perform
 #include <array>
 #include <map>
 #include <thread>
+#include <atomic>
 #include <mutex>
 #include <linux/futex.h>
 #include <algorithm>
@@ -42,6 +44,7 @@ The current tools for both of these actions are lacking in terms of both perform
 #include <err.h>
 #include <sys/mman.h>
 
+#include "Threadpool.h"
 using namespace std;
 
 /*
@@ -52,8 +55,8 @@ CPUcount chunks and returns a vector 'chunks'.
 vector <string> chunk(const string &buff, const uint32_t core_count, const size_t length);
 
 /*
-Parser fn's will take in the vector from chunks. They parse this and pull out a vector
-of string vectors, each one holding the relevant information for a rule
+Parser fn's will take in a string from the vector of strings returned from chunks. They parse this 
+and pull out a vector of string vectors, each one holding the relevant information for a rule
 */
 
 void aaparse(const string &str, vector<vector<string> >& parsedvals);
@@ -77,8 +80,13 @@ void sandbox();
 
 mutex mtx;
 
+typedef function<void(const string &str, vector<vector<string> >& parsedvals)> pfnc;
+typedef function<void(const vector<string>&, vector<string>&)> gfnc;
+
 int main(int argc, char *argv[]){
-	
+	std::chrono::time_point<std::chrono::steady_clock> start, end;
+	std::chrono::duration<double> elapsed_seconds;
+
 	if(getuid())
 		err(0, "Must be run as root user");
 
@@ -97,11 +105,11 @@ int main(int argc, char *argv[]){
 	string logbuff;
 	vector<string> threadbuffs;
 	
-	static void (*parse)(const string &str, vector<vector<string> >& parsedvals);
-	static void (*gen)(const vector<string>& pvals, vector<string>& rules);
+	function<void(const string &str, vector<vector<string> >& parsedvals)> parse;
+	function<void(const vector<string>& pvals, vector<string>& rules)> gen;
 
 	if(argc <= 1){
-		cout << "SyslogParse takes two arguments:\n'iptables' or 'apparmor' (required) \n path to logfile (optional)\n";
+		// cout << "SyslogParse takes two arguments:\n'iptables' or 'apparmor' (required) \n path to logfile (optional)\n";
 		exit(1);
 	}
 
@@ -140,9 +148,13 @@ int main(int argc, char *argv[]){
 	}
 
 	// Check for CPU core count
-	size_t core_count = sysconf( _SC_NPROCESSORS_ONLN );
+	size_t core_count;// = sysconf( _SC_NPROCESSORS_ONLN );
+	core_count = thread::hardware_concurrency();
 	if ((core_count < 1) || (core_count > MAX_CPU))
 			core_count = 2; // If we get some weird response, assume that the system is at least a dual core.
+
+	start = std::chrono::steady_clock::now();
+	end = std::chrono::steady_clock::now();
 
 	ifstream logf(logfile);
 
@@ -160,20 +172,51 @@ int main(int argc, char *argv[]){
 
 	logf.close();
 
-	sandbox();
+	elapsed_seconds = end-start;
+	// cout << "openlog::  " << elapsed_seconds.count() << "ms" << endl;
+
+	start = std::chrono::steady_clock::now();
+	end = std::chrono::steady_clock::now();
+	
+	//sandbox();
+
+	elapsed_seconds = end-start;
+	// cout << "sandbox::  " << elapsed_seconds.count() << "ms" << endl;
+	
+	start = std::chrono::steady_clock::now();
+	end = std::chrono::steady_clock::now();
 
 	threadbuffs.reserve(core_count);
 	threadbuffs = chunk(logbuff, core_count, logsize);
 	
-	vector<std::thread> threads;	
+	elapsed_seconds = end-start;
+	// cout << "chunk::  " << elapsed_seconds.count() * 1000 << "ms" << endl;
+	
+	vector<thread> threads(core_count);	
 	vector<vector<string>> parsedvals;
 
-	threads.reserve(core_count);
+	start = std::chrono::steady_clock::now();
 
-	for (vector<string>::const_iterator it = threadbuffs.begin() ; it != threadbuffs.end(); ++it)
-		threads.push_back(thread(parse, std::cref(*it), std::ref(parsedvals)));
+	// Threadpool<pfnc, vector<string>, vector<vector<string> > > pool(core_count);
+	// pool.set_function(parse);
+	// pool.set_input(ref(threadbuffs));
+	// pool.set_output(ref(parsedvals));
+	// pool.execute_no_atomic();
+	// pool.join();
+
+	i = 0;
+	for (vector<string>::const_iterator it = threadbuffs.begin() ; it != threadbuffs.end(); ++it){
+		threads.at(i) = (thread(parse, std::cref(*it), std::ref(parsedvals)));
+		i++;
+	}
 
 	for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
+
+	end = std::chrono::steady_clock::now();
+
+	elapsed_seconds = end-start;
+	cout << "parse::  " << elapsed_seconds.count() * 1000 << "ms" << endl;
+
 
 	if(parsedvals.size() < 1)
 		err(0, "parsedvals.size() < 1");
@@ -182,32 +225,51 @@ int main(int argc, char *argv[]){
 	vector<vector<string> >::iterator it;
 	it = unique (parsedvals.begin(), parsedvals.end()); 
   	parsedvals.resize( distance(parsedvals.begin(),it) );
-	//cout << parsedvals.size() << endl;
+	//// cout << parsedvals.size() << endl;
 
 	// Begin rule generation
   	vector<string> rules;
-  	//rules.resize(parsedvals.size()); Remove mutex, instead use atomic increment - should speed up a lot
+
+  //rules.resize(parsedvals.size()); //Remove mutex, instead use atomic increment - should speed up a lot
 	threads.clear();
 
 	// Threadpool!
+	//cout <<  << endl;
+	
 
-	for (vector<vector<string> >::const_iterator it = parsedvals.begin() ; it != parsedvals.end(); ++it){
-		// create threads core_count at a time
-		for(i = 0; i < core_count; i++){
-			threads.push_back(thread(gen, std::cref(*it), std::ref(rules)));
-			if(it != parsedvals.end() - 1)	// Last one? Iterate, push, and break
-				++it;
-			else
-				break;
-		}
-		for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
-		threads.clear();
-	}
-		// If we break we have to clean up
-		for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
-			threads.clear();
+	start = std::chrono::steady_clock::now();
 
-	// cout rules
+	Threadpool<gfnc, vector<vector<string> >, vector<string> > gpool(core_count);
+	gpool.set_function(gen);
+	gpool.set_input(ref(parsedvals));
+	gpool.set_output(ref(rules));
+	gpool.execute_no_atomic();
+	gpool.join();
+
+	rules = gpool.get_output();
+
+	// for (vector<vector<string> >::const_iterator it = parsedvals.begin() ; it != parsedvals.end(); ++it){
+	// 	// create threads core_count at a time
+	// 	for(i = 0; i < core_count; i++){
+	// 		threads.push_back(thread(gen, std::cref(*it), std::ref(rules)));
+	// 		if(it != parsedvals.end() - 1)	// Last one? Iterate, push, and break
+	// 			++it;
+	// 		else
+	// 			break;
+	// 	}
+	// 	for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
+	// 	threads.clear();
+	// }
+	// 	// If we break we have to clean up
+	// 	for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
+	// 		threads.clear();
+
+	end = std::chrono::steady_clock::now();
+
+	elapsed_seconds = end-start;
+	cout << "gen::  " << elapsed_seconds.count() * 1000 << "ms" << endl;
+
+	// // cout rules
 
 	for(vector<string>::const_iterator it = rules.begin() ; it != rules.end(); ++it)
 		cout << *it << endl;
@@ -231,6 +293,7 @@ void ipgen(const vector<string>& pvals, vector<string>& rules){
 	const string destination_port	= " --dport ";
 
 	string rule = "";
+	
 	if(pvals[0] == "INPUT"){							
 				rule  = iptables 	+ 		input 
 				+		in_device 	+ 		pvals[1] 
@@ -246,10 +309,14 @@ void ipgen(const vector<string>& pvals, vector<string>& rules){
 				+		protocol	+	pvals[6]
 				+		source_port +	pvals[7];
 	}else{
+		return;
 		err(0, "pvals[0] is not INPUT or OUTPUT.");
 	}
-	
+	//rules.at(i) = rule;
 	mtx.lock();
+//	cout << i << endl;
+//	cout << rules.size() << endl;
+//	cout << rule << endl;
 	rules.push_back(rule);
 	mtx.unlock();
 }
@@ -312,7 +379,7 @@ void aagen(const vector<string>& pvals, vector<string>& rules){
 
 	// for(int i = 0; i < pvals.size(); ++i){
 	// 	mtx.lock();
-	// 	cout << pvals[i] << endl;
+	// 	// cout << pvals[i] << endl;
 	// 	mtx.unlock();
 	// }
 
@@ -579,7 +646,15 @@ void sandbox(){
 	rfile.read(reinterpret_cast<char*>(&seed), sizeof(seed));
 
 	rfile.close();
-	//cout << seed << endl;
+	//// cout << seed << endl;
+
+	/*
+	std::random_device rd;     // only used once to initialise engine
+	std::mt19937 rng(rd);      // random-number engine used
+	std::uniform_int_distribution<int> uni(min,max); // guaranteed unbiased
+
+	auto random_integer = uni(rng);
+	*/
 	srand(seed);
 
 	passwd 	*ps;
@@ -620,9 +695,9 @@ void sandbox(){
     if (setuid(uid))
         err(0, "setuid failed.");
 
-    // cout << "GID = " << getgid() << endl;
+    // // cout << "GID = " << getgid() << endl;
 
-    // cout << "UID = " << getuid() << endl;
+    // // cout << "UID = " << getuid() << endl;
 
     // seccomp
 
