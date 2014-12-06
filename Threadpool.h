@@ -1,7 +1,15 @@
 #ifndef THREADPOOL_H
 #define THREADPOOL_H
+#include <iostream>
+#include <functional>
+#include <algorithm>
+#include <thread>
+#include <mutex>
+#include <vector>
+#include <condition_variable>
+#include <atomic> 
+//#include <assert.h>
 
-using namespace std;
 // T = function
 // R = container to store output
 // S = data to be acted upon
@@ -9,96 +17,157 @@ template<class T, class R, class S>
 class Threadpool
 {
 	public:
-		Threadpool(size_t count);
-		void set_function(T);
-		void set_input(R&);
-		void set_output(S&);
-		void set_output(S&, size_t i);
-		S get_output();
-		void execute_no_atomic();
+		Threadpool(const T&);
+		Threadpool(const size_t count);
+		Threadpool(const size_t count, const T&);
+
+		void set_function(const T&);
+		void execute_no_atomic(R&, S&);
+		void execute_atomic(R&, S&);
 		void join();
-		~Threadpool();
+		void sleep_all();
+		void wake_all();
+		size_t get_active_count();
+		size_t get_items_processed();
+		size_t get_thread_count();
 
 	private:
-		void thread_exec();
+		void thread_exec(R&, S&, std::atomic<size_t>& it);
+		void thread_exec_i(R&, S&, std::atomic<size_t>& it);
 		size_t thread_count;
 		size_t active_count;
-		vector<thread> threads;
-		R input;
-		S output;
+		std::vector<std::thread> threads;
 		T fn;
-		mutex mtx;
-		bool t;
-	
+		std::mutex mtx;
+		std::condition_variable condition;
+		std::atomic<size_t> it;
+		bool spin;
 };
 
-template<class T, class R, class S> Threadpool<T,R,S>::Threadpool(size_t count){
-	threads.resize(count);
-	thread_count = count;
+template<class T, class R, class S> 
+Threadpool<T,R,S>::Threadpool(const size_t thread_count){
+	threads.resize(thread_count);
+	this->thread_count = thread_count;
 	active_count = 0;
+	it = 0;
+	spin = false;
 }
 
-template<class T, class R, class S> void Threadpool<T,R,S>::set_function(T f){
-	fn = f;
+template<class T, class R, class S> 
+Threadpool<T,R,S>::Threadpool(const T& fn){
+	thread_count = std::thread::hardware_concurrency();
+	this->fn = fn;
+	threads.resize(thread_count);
+	active_count = 0;
+	it = 0;
+	spin = false;
 }
 
-template<class T, class R, class S> void Threadpool<T,R,S>::set_input(R& i){
-	input = i;
-}
-template<class T, class R, class S> void Threadpool<T,R,S>::set_output(S& o){
-	output = o;
-
-	//output.resize(input.size());
-}
-
-template<class T, class R, class S> void Threadpool<T,R,S>::set_output(S& o, size_t i){
-	output = o;
+template<class T, class R, class S> 
+Threadpool<T,R,S>::Threadpool(const size_t thread_count, const T& fn){
+	threads.resize(thread_count);
+	this->fn = fn;
+	this->thread_count = thread_count;
+	active_count = 0;
+	it = 0;
+	spin = false;
 }
 
-template<class T, class R, class S> void Threadpool<T,R,S>::execute_no_atomic(){
-	// wrap the function we passed in into a thread, have each thread use the code below
+template<class T, class R, class S> 
+void Threadpool<T,R,S>::set_function(const T& fn){
+	this->fn = fn;
+}
 
-	for (int i = 0; i < thread_count; ++i)
+template<class T, class R, class S> 
+void Threadpool<T,R,S>::execute_no_atomic(R& input, S& output){
+	active_count = thread_count;
+	for (size_t i = 0; i < thread_count; ++i)
 	{
-		threads[i] = thread(&Threadpool::thread_exec, this);
-		
+		threads[i] = std::thread(&Threadpool::thread_exec, this, std::ref(input), std::ref(output), std::ref(it));
 	}
 }
 
-template<class T, class R, class S> void Threadpool<T,R,S>::thread_exec(){
-//	size_t output_index = 0;
-	auto currentIndex = input.begin();
+template<class T, class R, class S> 
+void Threadpool<T,R,S>::thread_exec(R& input, S& output, std::atomic<size_t>& it){
+	std::unique_lock<std::mutex> lck(mtx);
+	while(it < input.size()) {
+		while(spin){
+			active_count--;
+			condition.wait(lck);
+			active_count++;
+		}
+		size_t currentIndex = it++;
+		if(currentIndex >= input.size()) {
+			it--;
+			break;
+		}
+		fn(std::ref(input[currentIndex]), std::ref(output));
+	}
+	active_count--;
+}
 
-	while(currentIndex != input.end()) {
-		mtx.lock();
-
-	    if(currentIndex == input.end()) {
-	        break;
-	    }
-	    currentIndex++;
-	    //cout << output.size() << endl;
-	    mtx.unlock();
-
-		fn(cref(*currentIndex), ref(output));
+template<class T, class R, class S> 
+void Threadpool<T,R,S>::execute_atomic(R& input, S& output){
+	active_count = thread_count;
+	for (size_t i = 0; i < thread_count; ++i)
+	{
+		threads[i] = std::thread(&Threadpool::thread_exec_i, this, std::ref(input), std::ref(output), std::ref(it));
 	}
 }
 
-template<class T, class R, class S> void Threadpool<T,R,S>::join(){
-	//for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
+template<class T, class R, class S> 
+void Threadpool<T,R,S>::thread_exec_i(R& input, S& output, std::atomic<size_t>& it){
+	std::unique_lock<std::mutex> lck(mtx);
+	while(it < input.size()) {
+		while(spin){
+			active_count--;
+			condition.wait(lck);
+			active_count++;
+		}
+		size_t currentIndex = it++;
+		if(currentIndex >= input.size()) {
+			it--;
+			break;
+		}
+		fn(std::ref(input[currentIndex]), std::ref(output), currentIndex);
+	}
+	active_count--;
+}
 
-	//cout << threads.size() << endl;
-	for (int i = 0; i < thread_count; ++i)
+template<class T, class R, class S> 
+void Threadpool<T,R,S>::join(){
+	for (size_t i = 0; i < thread_count; ++i)
 	{
 		threads[i].join();
 	}
-
 }
 
-template<class T, class R, class S> S Threadpool<T,R,S>::get_output(){
-	return output;
+// sleep and wake not implemented
+template<class T, class R, class S> 
+void Threadpool<T,R,S>::sleep_all(){
+	spin = true;
 }
 
-template<class T, class R, class S> Threadpool<T,R,S>::~Threadpool(){
-	threads.clear();
+// sleep and wake not implemented
+template<class T, class R, class S> 
+void Threadpool<T,R,S>::wake_all(){
+	spin = false;
+	condition.notify_all();
 }
+
+template<class T, class R, class S> 
+size_t Threadpool<T,R,S>::get_active_count(){
+	return active_count;
+}
+
+template<class T, class R, class S> 
+size_t Threadpool<T,R,S>::get_items_processed(){
+	return it;
+}
+
+template<class T, class R, class S> 
+size_t Threadpool<T,R,S>::get_thread_count(){
+	return thread_count;
+}
+
 #endif

@@ -101,7 +101,7 @@ int main(int argc, char *argv[]){
 	capng_apply(CAPNG_SELECT_BOTH);
 
 	uint32_t MAX_CPU;
-	size_t i;
+	//size_t i;
 	string logbuff;
 	vector<string> threadbuffs;
 	
@@ -135,6 +135,8 @@ int main(int argc, char *argv[]){
 			err(0, "can only read files in /var/log/");
 	}
 
+//	logfile = "/var/log/testlog";
+
 	// set MAX_CPU
 	ifstream file("/proc/sys/kernel/threads-max");
 
@@ -153,9 +155,6 @@ int main(int argc, char *argv[]){
 	if ((core_count < 1) || (core_count > MAX_CPU))
 			core_count = 2; // If we get some weird response, assume that the system is at least a dual core.
 
-	start = std::chrono::steady_clock::now();
-	end = std::chrono::steady_clock::now();
-
 	ifstream logf(logfile);
 
 	if(!logf)
@@ -172,19 +171,19 @@ int main(int argc, char *argv[]){
 
 	logf.close();
 
-	elapsed_seconds = end-start;
+	// elapsed_seconds = end-start;
 	// cout << "openlog::  " << elapsed_seconds.count() << "ms" << endl;
 
-	start = std::chrono::steady_clock::now();
-	end = std::chrono::steady_clock::now();
+	// start = std::chrono::steady_clock::now();
+	// end = std::chrono::steady_clock::now();
 	
 	//sandbox();
 
-	elapsed_seconds = end-start;
+	// elapsed_seconds = end-start;
 	// cout << "sandbox::  " << elapsed_seconds.count() << "ms" << endl;
 	
-	start = std::chrono::steady_clock::now();
-	end = std::chrono::steady_clock::now();
+	// start = std::chrono::steady_clock::now();
+	// end = std::chrono::steady_clock::now();
 
 	threadbuffs.reserve(core_count);
 	threadbuffs = chunk(logbuff, core_count, logsize);
@@ -195,29 +194,19 @@ int main(int argc, char *argv[]){
 	vector<thread> threads(core_count);	
 	vector<vector<string>> parsedvals;
 
-	start = std::chrono::steady_clock::now();
+	// start = std::chrono::steady_clock::now();
 
-	// Threadpool<pfnc, vector<string>, vector<vector<string> > > pool(core_count);
-	// pool.set_function(parse);
-	// pool.set_input(ref(threadbuffs));
-	// pool.set_output(ref(parsedvals));
-	// pool.execute_no_atomic();
-	// pool.join();
+	Threadpool<pfnc, vector<string>, vector<vector<string> > > pool(core_count);
+	pool.set_function(parse);
+	pool.execute_no_atomic(ref(threadbuffs), ref(parsedvals));
+	pool.join();
 
-	i = 0;
-	for (vector<string>::const_iterator it = threadbuffs.begin() ; it != threadbuffs.end(); ++it){
-		threads.at(i) = (thread(parse, std::cref(*it), std::ref(parsedvals)));
-		i++;
-	}
+	// end = std::chrono::steady_clock::now();
 
-	for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
+	// elapsed_seconds = end-start;
+	// cout << "parse::  " << elapsed_seconds.count() * 1000 << "ms" << endl;
 
-	end = std::chrono::steady_clock::now();
-
-	elapsed_seconds = end-start;
-	cout << "parse::  " << elapsed_seconds.count() * 1000 << "ms" << endl;
-
-
+	// cout << parsedvals.size() << endl;
 	if(parsedvals.size() < 1)
 		err(0, "parsedvals.size() < 1");
 
@@ -225,54 +214,27 @@ int main(int argc, char *argv[]){
 	vector<vector<string> >::iterator it;
 	it = unique (parsedvals.begin(), parsedvals.end()); 
   	parsedvals.resize( distance(parsedvals.begin(),it) );
-	//// cout << parsedvals.size() << endl;
+	// cout << parsedvals.size() << endl;
 
 	// Begin rule generation
   	vector<string> rules;
 
-  //rules.resize(parsedvals.size()); //Remove mutex, instead use atomic increment - should speed up a lot
-	threads.clear();
-
-	// Threadpool!
-	//cout <<  << endl;
-	
-
-	start = std::chrono::steady_clock::now();
+	// start = std::chrono::steady_clock::now();
 
 	Threadpool<gfnc, vector<vector<string> >, vector<string> > gpool(core_count);
 	gpool.set_function(gen);
-	gpool.set_input(ref(parsedvals));
-	gpool.set_output(ref(rules));
-	gpool.execute_no_atomic();
+	gpool.execute_no_atomic(ref(parsedvals), ref(rules));
 	gpool.join();
 
-	rules = gpool.get_output();
+	// end = std::chrono::steady_clock::now();
 
-	// for (vector<vector<string> >::const_iterator it = parsedvals.begin() ; it != parsedvals.end(); ++it){
-	// 	// create threads core_count at a time
-	// 	for(i = 0; i < core_count; i++){
-	// 		threads.push_back(thread(gen, std::cref(*it), std::ref(rules)));
-	// 		if(it != parsedvals.end() - 1)	// Last one? Iterate, push, and break
-	// 			++it;
-	// 		else
-	// 			break;
-	// 	}
-	// 	for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
-	// 	threads.clear();
-	// }
-	// 	// If we break we have to clean up
-	// 	for_each(threads.begin(), threads.end(), mem_fn(&std::thread::join));
-	// 		threads.clear();
-
-	end = std::chrono::steady_clock::now();
-
-	elapsed_seconds = end-start;
-	cout << "gen::  " << elapsed_seconds.count() * 1000 << "ms" << endl;
+	// elapsed_seconds = end-start;
+	// cout << "gen::  " << elapsed_seconds.count() * 1000 << "ms" << endl;
 
 	// // cout rules
 
-	for(vector<string>::const_iterator it = rules.begin() ; it != rules.end(); ++it)
-		cout << *it << endl;
+	// for(vector<string>::const_iterator it = rules.begin() ; it != rules.end(); ++it)
+	// 	cout << *it << endl;
 
 	return 0;
 }
